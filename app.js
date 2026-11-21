@@ -98,6 +98,7 @@ function workoutsUpToLogDate(workouts) {
 async function boot() {
   await openDB();
   exercises = await fetch('exercises.json').then(r => r.json());
+  await migrateCardioTypes();
   loadSettings();
   await renderHome();
   renderLog();
@@ -106,6 +107,18 @@ async function boot() {
   setupNav();
   setupModal();
   setupRangeToggle();
+}
+
+// Cardio renames: outdoor cycling was always lawn mowing
+async function migrateCardioTypes() {
+  const renames = { 'Cycling (outdoor)': 'Lawn Mowing' };
+  for (const w of await dbGetAll('workouts')) {
+    let changed = false;
+    (w.cardio || []).forEach(c => {
+      if (renames[c.type]) { c.type = renames[c.type]; changed = true; }
+    });
+    if (changed) await dbPut('workouts', w);
+  }
 }
 
 // ── NAV ─────────────────────────────────────────────────
@@ -171,7 +184,7 @@ const isLiftWorkout = w => hasLifting(w) || !!w.fitbit?.isLift;
 
 function workoutTitle(w) {
   const day = exercises.days.find(d => d.id === w.dayId);
-  if (isLiftWorkout(w)) return day ? `Day ${day.id}: ${day.label}` : 'Lifting (Fitbit)';
+  if (isLiftWorkout(w)) return day ? `Day ${day.id}: ${day.label}` : 'Weightlifting (Fitbit)';
   return 'Cardio';
 }
 
@@ -520,7 +533,11 @@ const FITBIT_CARDIO_MAP = {
   ROWING_MACHINE: 'Rowing Machine',
   STATIONARY_BIKE: 'Stationary Bike', SPINNING: 'Stationary Bike', ASSAULT_BIKE: 'Stationary Bike',
   RUNNING: 'Running (outdoor)', TRAIL_RUN: 'Running (outdoor)',
-  BIKING: 'Cycling (outdoor)', OUTDOOR_BIKE: 'Cycling (outdoor)', MOUNTAIN_BIKE: 'Cycling (outdoor)', ELECTRIC_BIKE: 'Cycling (outdoor)',
+  // Fitbit auto-detects mowing as biking (Jack doesn't bike outdoors), so these are mowing
+  BIKING: 'Lawn Mowing', OUTDOOR_BIKE: 'Lawn Mowing', MOUNTAIN_BIKE: 'Lawn Mowing', ELECTRIC_BIKE: 'Lawn Mowing',
+  MOWING_LAWN: 'Lawn Mowing',
+  WALKING: 'Walk/Hike', HIKING: 'Walk/Hike', POWER_WALKING: 'Walk/Hike', NORDIC_WALKING: 'Walk/Hike',
+  BACKPACKING: 'Walk/Hike', RUCKING: 'Walk/Hike', WALK_WITH_WEIGHTS: 'Walk/Hike',
   SWIMMING: 'Swimming', SWIMMING_POOL: 'Swimming', SWIMMING_OPEN_WATER: 'Swimming',
   JUMPING_ROPE: 'Jump Rope'
 };
@@ -669,7 +686,7 @@ function renderFitbitList() {
 // ── FITBIT HISTORY SYNC ──────────────────────────────────
 // Pulls every Fitbit exercise session on the account. Re-runnable: sessions
 // already imported are skipped. Cardio becomes cardio-only entries; lifting
-// becomes an "Unassigned" lifting entry, or attaches its Fitbit stats (AZM,
+// becomes a "Weightlifting (Fitbit)" entry, or attaches its Fitbit stats (AZM,
 // heart rate) to a workout you already logged that day.
 
 // Unmapped Fitbit types that still count as cardio (imported as "Other").
@@ -765,6 +782,10 @@ async function importFitbitSessions(dataPoints) {
         workouts.push(w);
         n.lifts++;
       }
+    } else if (s.cardioType === 'Walk/Hike' && !(s.minutes > 30 && s.azm > 0)) {
+      // Only walks/hikes over 30 min that earned Active Zone Minutes count as cardio
+      skipped[`${s.name} (short/easy)`] = (skipped[`${s.name} (short/easy)`] || 0) + 1;
+      continue;
     } else if (FITBIT_CARDIO_MAP[s.exerciseType] || FITBIT_OTHER_CARDIO.has(s.exerciseType)) {
       const entry = { type: s.cardioType, minutes: s.minutes, fitbitId: s.id,
                       azm: s.azm, avgHr: s.avgHr, calories: s.calories };
@@ -797,7 +818,7 @@ async function importFitbitSessions(dataPoints) {
   if (n.already) parts.push(`${n.already} already imported.`);
   const skippedList = Object.entries(skipped).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${v} ${k}`);
   if (skippedList.length) parts.push(`Skipped (not lifting/cardio): ${skippedList.join(', ')}.`);
-  if (n.lifts) parts.push('Assign lifting sessions to a day from the History tab.');
+  if (n.lifts) parts.push('Lifting sessions can be assigned to a day from the History tab (optional).');
   return parts.join(' ');
 }
 
@@ -1105,16 +1126,18 @@ function drawChart(key, canvasId, labels, datasets, options) {
 }
 
 // Workouts per period, stacked by training day so a missed day stands out.
-// Fitbit lifting sessions not yet assigned to a day show as a gray "Unassigned" segment.
+// Lifting not assigned to a day (e.g. imported from Fitbit) is "Weightlifting";
+// standalone cardio sessions (walks, mowing, treadmill-only days…) are "Other".
 function renderWorkoutsChart(workouts) {
   const periods = periodBuckets();
-  const lifts = workouts.filter(isLiftWorkout);
-  const count = pred => periods.map(p => lifts.filter(w => pred(w) && periodKey(w) === p).length);
+  const count = pred => periods.map(p => workouts.filter(w => pred(w) && periodKey(w) === p).length);
 
-  const datasets = exercises.days.map((day, i) =>
-    stackedDataset(`D${day.id}: ${day.label}`, count(w => w.dayId === day.id), SERIES_COLORS[i] || OTHER_COLOR));
-  const unassigned = count(w => !w.dayId);
-  if (unassigned.some(n => n)) datasets.push(stackedDataset('Unassigned', unassigned, OTHER_COLOR));
+  const datasets = exercises.days.map((day, i) => stackedDataset(`D${day.id}: ${day.label}`,
+    count(w => isLiftWorkout(w) && w.dayId === day.id), SERIES_COLORS[i] || OTHER_COLOR));
+  const lifting = count(w => isLiftWorkout(w) && !w.dayId);
+  if (lifting.some(n => n)) datasets.push(stackedDataset('Weightlifting', lifting, SERIES_COLORS[4]));
+  const other = count(w => !isLiftWorkout(w) && (w.cardio || []).length);
+  if (other.some(n => n)) datasets.push(stackedDataset('Other', other, OTHER_COLOR));
 
   const options = stackedBarOptions('Workouts', '');
   if (rangeUnit() === 'week') options.scales.y.suggestedMax = 5; // weekly goal ceiling
