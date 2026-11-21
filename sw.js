@@ -1,14 +1,15 @@
-const CACHE = 'fitnesscoach-v3';
+const CACHE = 'fitnesscoach-v4';
 const STATIC = [
-  '/',
-  '/index.html',
-  '/style.css',
-  '/app.js',
-  '/exercises.json',
-  '/manifest.json',
-  '/icons/icon.svg',
-  '/icons/icon-192.png',
-  '/icons/icon-512.png'
+  // Relative to sw.js, so the app works at a domain root or in a subfolder
+  './',
+  'index.html',
+  'style.css',
+  'app.js',
+  'exercises.json',
+  'manifest.json',
+  'icons/icon.svg',
+  'icons/icon-192.png',
+  'icons/icon-512.png'
 ];
 
 self.addEventListener('install', e => {
