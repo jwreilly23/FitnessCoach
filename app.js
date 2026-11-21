@@ -109,10 +109,17 @@ async function boot() {
   setupRangeToggle();
 }
 
-// Cardio renames: outdoor cycling was always lawn mowing
+// Data fixes run on load:
+// - outdoor cycling was always lawn mowing
+// - Fitbit-imported walk/hike entries below the workout bar are removed
+//   (only standalone entries that contain nothing else)
 async function migrateCardioTypes() {
   const renames = { 'Cycling (outdoor)': 'Lawn Mowing' };
   for (const w of await dbGetAll('workouts')) {
+    const cardio = w.cardio || [];
+    const weakWalkOnly = !hasLifting(w) && !w.fitbit && !w.notes && cardio.length &&
+      cardio.every(c => c.fitbitId && c.type === 'Walk/Hike' && !walkCounts(c.minutes, c.azm));
+    if (weakWalkOnly) { await dbDelete('workouts', w.id); continue; }
     let changed = false;
     (w.cardio || []).forEach(c => {
       if (renames[c.type]) { c.type = renames[c.type]; changed = true; }
@@ -166,7 +173,8 @@ async function renderHome() {
   const thisWeek  = workouts.filter(w => new Date(w.date) >= weekStart);
   const cardioMin = thisWeek.reduce((s, w) => s + (w.cardio || []).reduce((a, c) => a + c.minutes, 0), 0);
   document.getElementById('week-stats').innerHTML = `
-    <div class="stat-box"><div class="stat-val">${thisWeek.filter(isLiftWorkout).length}</div><div class="stat-lbl">Workouts</div></div>
+    <div class="stat-box"><div class="stat-val">${new Set(thisWeek.filter(w => isLiftWorkout(w) || (w.cardio || []).length)
+      .map(w => localDateStr(new Date(w.date)))).size}</div><div class="stat-lbl">Workout days</div></div>
     <div class="stat-box"><div class="stat-val">${cardioMin}</div><div class="stat-lbl">Cardio min</div></div>
     <div class="stat-box"><div class="stat-val">${Math.round(cardioMin/60*10)/10}</div><div class="stat-lbl">Cardio hrs</div></div>
   `;
@@ -689,6 +697,11 @@ function renderFitbitList() {
 // becomes a "Weightlifting (Fitbit)" entry, or attaches its Fitbit stats (AZM,
 // heart rate) to a workout you already logged that day.
 
+// A Fitbit walk/hike only counts as a workout if it's long and hard enough
+const WALK_MIN_MINUTES = 45;
+const WALK_MIN_AZM     = 15;
+const walkCounts = (minutes, azm) => minutes >= WALK_MIN_MINUTES && (azm || 0) >= WALK_MIN_AZM;
+
 // Unmapped Fitbit types that still count as cardio (imported as "Other").
 // Everything else (walks, hikes, chores…) is skipped to keep history clean.
 const FITBIT_OTHER_CARDIO = new Set(['HIIT', 'CARDIO_WORKOUT', 'AEROBIC_WORKOUT', 'INTERVAL_WORKOUT',
@@ -782,8 +795,8 @@ async function importFitbitSessions(dataPoints) {
         workouts.push(w);
         n.lifts++;
       }
-    } else if (s.cardioType === 'Walk/Hike' && !(s.minutes > 30 && s.azm > 0)) {
-      // Only walks/hikes over 30 min that earned Active Zone Minutes count as cardio
+    } else if (s.cardioType === 'Walk/Hike' && !walkCounts(s.minutes, s.azm)) {
+      // Only walks/hikes of 45+ min with 15+ Active Zone Minutes count as workouts
       skipped[`${s.name} (short/easy)`] = (skipped[`${s.name} (short/easy)`] || 0) + 1;
       continue;
     } else if (FITBIT_CARDIO_MAP[s.exerciseType] || FITBIT_OTHER_CARDIO.has(s.exerciseType)) {
@@ -1072,7 +1085,7 @@ function setupRangeToggle() {
 
 function updateProgressLabels() {
   const per = rangeUnit() === 'week' ? 'WEEK' : 'MONTH';
-  document.getElementById('label-workouts').textContent = `WORKOUTS PER ${per}`;
+  document.getElementById('label-workouts').textContent = `WORKOUT DAYS PER ${per}`;
   document.getElementById('label-cardio').textContent   = `CARDIO MINUTES PER ${per}`;
   document.getElementById('label-azm').textContent      = `ACTIVE ZONE MINUTES PER ${per}`;
 }
@@ -1125,21 +1138,40 @@ function drawChart(key, canvasId, labels, datasets, options) {
   progressCharts[key] = new Chart(ctx, { type: 'bar', data: { labels, datasets }, options });
 }
 
-// Workouts per period, stacked by training day so a missed day stands out.
-// Lifting not assigned to a day (e.g. imported from Fitbit) is "Weightlifting";
-// standalone cardio sessions (walks, mowing, treadmill-only days…) are "Other".
+// Workout DAYS per period: each calendar day counts once, so lifting followed
+// by cardio is one day, not two. A day is labelled by what it included, in
+// priority order: training day D1-D4 > Weightlifting (lifting not assigned to
+// a day) > Other (cardio only).
+function dayCategory(dayWorkouts) {
+  const assigned = dayWorkouts.find(w => isLiftWorkout(w) && w.dayId);
+  if (assigned) return 'D' + assigned.dayId;
+  if (dayWorkouts.some(isLiftWorkout)) return 'lift';
+  if (dayWorkouts.some(w => (w.cardio || []).length)) return 'other';
+  return null;
+}
+
 function renderWorkoutsChart(workouts) {
   const periods = periodBuckets();
-  const count = pred => periods.map(p => workouts.filter(w => pred(w) && periodKey(w) === p).length);
+  const byDate = {};
+  workouts.forEach(w => (byDate[localDateStr(new Date(w.date))] ??= []).push(w));
+
+  const counts = {}; // category -> per-period day counts
+  Object.values(byDate).forEach(dayWs => {
+    const cat = dayCategory(dayWs);
+    const i = periods.indexOf(periodKey(dayWs[0]));
+    if (!cat || i < 0) return;
+    (counts[cat] ??= periods.map(() => 0))[i]++;
+  });
+  const zeros = periods.map(() => 0);
 
   const datasets = exercises.days.map((day, i) => stackedDataset(`D${day.id}: ${day.label}`,
-    count(w => isLiftWorkout(w) && w.dayId === day.id), SERIES_COLORS[i] || OTHER_COLOR));
-  const lifting = count(w => isLiftWorkout(w) && !w.dayId);
-  if (lifting.some(n => n)) datasets.push(stackedDataset('Weightlifting', lifting, SERIES_COLORS[4]));
-  const other = count(w => !isLiftWorkout(w) && (w.cardio || []).length);
-  if (other.some(n => n)) datasets.push(stackedDataset('Other', other, OTHER_COLOR));
+    counts['D' + day.id] || zeros, SERIES_COLORS[i] || OTHER_COLOR));
+  if (counts.lift)  datasets.push(stackedDataset('Weightlifting', counts.lift, SERIES_COLORS[4]));
+  if (counts.other) datasets.push(stackedDataset('Other', counts.other, OTHER_COLOR));
 
-  const options = stackedBarOptions('Workouts', '');
+  const options = stackedBarOptions('Workout days', '');
+  options.plugins.tooltip.callbacks.footer = items =>
+    'Total: ' + items.reduce((s, i) => s + i.raw, 0) + ' days';
   if (rangeUnit() === 'week') options.scales.y.suggestedMax = 5; // weekly goal ceiling
   drawChart('workouts', 'chart-workouts', periods.map(periodLabel), datasets, options);
 }
