@@ -1196,11 +1196,36 @@ function dayLoad(dayWorkouts) {
     (w.cardio || []).reduce((s, c) => s + (c.azm ?? (Number(c.minutes) || 0)), 0), 0);
 }
 
+// A gym session: lifting plus machine cardio (stair climber, elliptical,
+// treadmill…) starting within 2 hours of each other, more than 30 min combined.
+// Walks/hikes and lawn mowing don't count toward a gym session.
+const GYM_SESSION_WINDOW_MIN = 120;
+const NON_GYM_CARDIO = new Set(['Walk/Hike', 'Lawn Mowing']);
+const fullMinutes = c => Number(c.fitbitMinutes ?? c.minutes) || 0;
+
+function gymSessionMinutes(dayWorkouts) {
+  let best = 0;
+  dayWorkouts.filter(isLiftWorkout).forEach(lift => {
+    const liftStart = new Date(lift.date).getTime();
+    let total = lift.fitbit?.minutes || 0;
+    dayWorkouts.forEach(w => {
+      const near = w === lift ||
+        Math.abs(new Date(w.date).getTime() - liftStart) <= GYM_SESSION_WINDOW_MIN * 60000;
+      if (!near) return;
+      (w.cardio || []).forEach(c => { if (!NON_GYM_CARDIO.has(c.type)) total += fullMinutes(c); });
+    });
+    best = Math.max(best, total);
+  });
+  return best;
+}
+
 function isWorkoutDay(dayWorkouts) {
   const liftedEnough = dayWorkouts.some(w =>
     (w.fitbit?.isLift && w.fitbit.minutes > WORKOUT_DAY_MIN_LIFT) ||
     (hasLifting(w) && !w.fitbit?.minutes));
-  return liftedEnough || dayLoad(dayWorkouts) >= WORKOUT_DAY_MIN_LOAD;
+  return liftedEnough ||
+    dayLoad(dayWorkouts) >= WORKOUT_DAY_MIN_LOAD ||
+    gymSessionMinutes(dayWorkouts) > WORKOUT_DAY_MIN_LIFT;
 }
 
 // Group workouts by local calendar date
@@ -1235,8 +1260,10 @@ function dayStatusText(dayWorkouts) {
   }
   const load = Math.round(dayLoad(dayWorkouts));
   const liftMin = Math.max(0, ...dayWorkouts.map(w => w.fitbit?.isLift ? w.fitbit.minutes || 0 : 0));
+  const gym = gymSessionMinutes(dayWorkouts);
   return { ok: false, text: `Not a workout day: ${load} cardio load (needs ${WORKOUT_DAY_MIN_LOAD})` +
-    (liftMin ? `, ${liftMin} min lifting (needs over ${WORKOUT_DAY_MIN_LIFT})` : '') };
+    (liftMin ? `, ${liftMin} min lifting (needs over ${WORKOUT_DAY_MIN_LIFT})` : '') +
+    (gym > liftMin ? `, ${gym} min lifting + gym cardio (needs over ${WORKOUT_DAY_MIN_LIFT})` : '') };
 }
 
 function renderWorkoutsChart(workouts) {
