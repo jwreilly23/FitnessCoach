@@ -109,8 +109,22 @@ async function boot() {
   setupRangeToggle();
 }
 
+// Cardio minutes never exceed Active Zone Minutes when Fitbit AZM is known,
+// so long low-effort sessions (a 4-hour hike with 45 AZM) don't skew cardio
+// totals. The full duration is kept as fitbitMinutes for display.
+function capCardioToAzm(c) {
+  if (c.azm == null) return false;
+  const full = c.fitbitMinutes ?? c.minutes;
+  const capped = Math.min(full, c.azm);
+  if (c.minutes === capped && (full === capped || c.fitbitMinutes === full)) return false;
+  if (full > capped) c.fitbitMinutes = full;
+  c.minutes = capped;
+  return true;
+}
+
 // Data fixes run on load:
 // - outdoor cycling was always lawn mowing
+// - Fitbit cardio minutes capped at AZM
 // - Fitbit-imported walk/hike entries below the workout bar are removed
 //   (only standalone entries that contain nothing else)
 async function migrateCardioTypes() {
@@ -118,11 +132,12 @@ async function migrateCardioTypes() {
   for (const w of await dbGetAll('workouts')) {
     const cardio = w.cardio || [];
     const weakWalkOnly = !hasLifting(w) && !w.fitbit && !w.notes && cardio.length &&
-      cardio.every(c => c.fitbitId && c.type === 'Walk/Hike' && !walkCounts(c.minutes, c.azm));
+      cardio.every(c => c.fitbitId && c.type === 'Walk/Hike' && !walkCounts(c.fitbitMinutes ?? c.minutes, c.azm));
     if (weakWalkOnly) { await dbDelete('workouts', w.id); continue; }
     let changed = false;
     (w.cardio || []).forEach(c => {
       if (renames[c.type]) { c.type = renames[c.type]; changed = true; }
+      if (capCardioToAzm(c)) changed = true;
     });
     if (changed) await dbPut('workouts', w);
   }
@@ -680,8 +695,10 @@ function renderFitbitList() {
       btn.textContent = added ? 'Added ✓' : 'Add';
       btn.disabled = added;
       btn.onclick = () => {
-        sessionCardio.push({ type: s.cardioType, minutes: s.minutes, fitbitId: s.id,
-                             azm: s.azm, avgHr: s.avgHr, calories: s.calories });
+        const entry = { type: s.cardioType, minutes: s.minutes, fitbitId: s.id,
+                        azm: s.azm, avgHr: s.avgHr, calories: s.calories };
+        capCardioToAzm(entry);
+        sessionCardio.push(entry);
         renderCardioList();
         renderFitbitList();
       };
@@ -802,12 +819,14 @@ async function importFitbitSessions(dataPoints) {
     } else if (FITBIT_CARDIO_MAP[s.exerciseType] || FITBIT_OTHER_CARDIO.has(s.exerciseType)) {
       const entry = { type: s.cardioType, minutes: s.minutes, fitbitId: s.id,
                       azm: s.azm, avgHr: s.avgHr, calories: s.calories };
+      capCardioToAzm(entry);
       // A cardio entry you typed in by hand that day with the same type is the same session
       const logged = workouts.find(w => sameDay(w, dateStr) &&
         (w.cardio || []).some(c => !c.fitbitId && c.type === s.cardioType));
       if (logged) {
         const c = logged.cardio.find(c => !c.fitbitId && c.type === s.cardioType);
         Object.assign(c, { fitbitId: s.id, azm: s.azm, avgHr: s.avgHr, calories: s.calories });
+        capCardioToAzm(c);
         await dbPut('workouts', logged);
         n.cardioMatched++;
       } else {
@@ -932,7 +951,7 @@ async function renderHistory() {
           w.fitbit.calories ? `${w.fitbit.calories} cal` : ''].filter(Boolean).join(' · ')}</div>` : ''}
       <ul class="history-exercises">
         ${exNames.map(n => `<li>${n}</li>`).join('')}
-        ${(w.cardio || []).map(c => `<li>${c.type} — ${c.minutes} min${c.azm ? ` · ${c.azm} AZM` : ''}${c.fitbitId ? ' ⌚' : ''}</li>`).join('')}
+        ${(w.cardio || []).map(c => `<li>${c.type} — ${c.minutes} min${c.azm ? ` · ${c.azm} AZM` : ''}${c.fitbitMinutes ? ` (${c.fitbitMinutes} min total)` : ''}${c.fitbitId ? ' ⌚' : ''}</li>`).join('')}
       </ul>
       ${w.fitbit?.isLift && !hasLifting(w) ? `
         <select class="input-field history-assign">
