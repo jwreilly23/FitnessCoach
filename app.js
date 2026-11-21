@@ -1249,7 +1249,10 @@ function renderCardioChart(workouts) {
         all += m;
       });
     });
-    Object.entries(totals).forEach(([g, m]) => { if (all && m / all < 0.10) minor.add(g); });
+    const ALWAYS_SHOWN = new Set(['Lawn Mowing']);
+    Object.entries(totals).forEach(([g, m]) => {
+      if (all && m / all < 0.10 && !ALWAYS_SHOWN.has(g)) minor.add(g);
+    });
   }
   const groupFor = type => { const g = cardioGroup(type); return minor.has(g) ? 'Other' : g; };
 

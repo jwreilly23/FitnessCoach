@@ -454,7 +454,7 @@ textarea.input-field { resize: vertical; }
 .toast.error   { color: var(--danger); border-color: var(--danger); }
 
 /* ── CHARTS ───────────────────────────────────────────── */
-canvas { max-height: 220px; }
+/* Chart canvases fill their .chart-box (no fixed max height) */
 
 /* ── SCROLLBAR ────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 4px; height: 4px; }
