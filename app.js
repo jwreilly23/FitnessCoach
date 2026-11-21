@@ -237,6 +237,7 @@ function renderLog() {
   updateLogDateUI();
 
   document.getElementById('add-cardio-btn').onclick = addCardio;
+  document.getElementById('fitbit-check-btn').onclick = checkFitbit;
   document.getElementById('save-workout-btn').onclick = saveWorkout;
   document.getElementById('log-new-btn').onclick = () => initSessionForDay(activeDay, { fresh: true });
   document.getElementById('add-alternate-btn').onclick = addAlternateExercise;
@@ -305,6 +306,7 @@ async function initSessionForDay(dayId, { fresh = false } = {}) {
   }
 
   renderCardioList();
+  document.getElementById('fitbit-list').innerHTML = ''; // results belong to the previous date/day
   updateSaveButtons();
   buildAlternateSelect(dayId);
   renderExerciseList();
@@ -482,8 +484,171 @@ function renderCardioList() {
     const div = document.createElement('div');
     div.className = 'cardio-item';
     div.innerHTML = `<span>${c.type} — ${c.minutes} min</span><button>×</button>`;
-    div.querySelector('button').onclick = () => { sessionCardio.splice(i, 1); renderCardioList(); };
+    div.querySelector('button').onclick = () => {
+      sessionCardio.splice(i, 1);
+      renderCardioList();
+      if (document.querySelector('.fitbit-item')) renderFitbitList();
+    };
     list.appendChild(div);
+  });
+}
+
+// ── FITBIT (Google Health API) ───────────────────────────
+// Reads Fitbit-recorded exercise sessions for the selected log date so they
+// can be added as cardio in one tap. Sign-in uses Google's browser token flow
+// (no server): an access token lasts about an hour, then Google asks again.
+const FITBIT = {
+  clientId: '32159203608-v1u4lc1j6c4lg4306omusfa1sn5kr770.apps.googleusercontent.com',
+  scope:    'https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly',
+  api:      'https://health.googleapis.com/v4/users/me/dataTypes'
+};
+
+// Fitbit exercise type -> this app's cardio type
+const FITBIT_CARDIO_MAP = {
+  TREADMILL: 'Treadmill', TREADMILL_WALK: 'Treadmill', INCLINE_WALK: 'Treadmill', INCLINE_RUN: 'Treadmill',
+  STAIRCLIMBER: 'Stairmaster',
+  ELLIPTICAL: 'Elliptical',
+  ROWING_MACHINE: 'Rowing Machine',
+  STATIONARY_BIKE: 'Stationary Bike', SPINNING: 'Stationary Bike', ASSAULT_BIKE: 'Stationary Bike',
+  RUNNING: 'Running (outdoor)', TRAIL_RUN: 'Running (outdoor)',
+  BIKING: 'Cycling (outdoor)', OUTDOOR_BIKE: 'Cycling (outdoor)', MOUNTAIN_BIKE: 'Cycling (outdoor)', ELECTRIC_BIKE: 'Cycling (outdoor)',
+  SWIMMING: 'Swimming', SWIMMING_POOL: 'Swimming', SWIMMING_OPEN_WATER: 'Swimming',
+  JUMPING_ROPE: 'Jump Rope'
+};
+// Lifting sessions are already logged as sets, so they aren't offered as cardio
+const FITBIT_LIFT_TYPES = new Set(['WEIGHTS', 'WEIGHTLIFTING', 'STRENGTH_TRAINING', 'FREE_WEIGHTS',
+  'WEIGHT_MACHINES', 'POWERLIFTING', 'FUNCTIONAL_STRENGTH_TRAINING', 'CORE_TRAINING', 'BODY_WEIGHT',
+  'CALISTHENICS', 'CIRCUIT_TRAINING', 'CROSSFIT', 'RESISTANCE_BANDS', 'TRX']);
+
+let fitbitToken = null; // { value, expires }
+try { fitbitToken = JSON.parse(sessionStorage.getItem('fitbitToken')); } catch {}
+let fitbitSessions = [];
+
+// Must be called straight from a tap (no await before it) so the sign-in popup isn't blocked
+function getFitbitToken() {
+  if (fitbitToken && fitbitToken.expires > Date.now() + 60000) return Promise.resolve(fitbitToken.value);
+  return new Promise((resolve, reject) => {
+    if (!window.google?.accounts?.oauth2) {
+      reject(new Error('Google sign-in didn\'t load. Check your connection and try again.'));
+      return;
+    }
+    const client = google.accounts.oauth2.initTokenClient({
+      client_id: FITBIT.clientId,
+      scope: FITBIT.scope,
+      callback: resp => {
+        if (resp.error || !resp.access_token) {
+          reject(new Error('Sign-in was cancelled or failed (' + (resp.error || 'no token') + ').'));
+          return;
+        }
+        fitbitToken = { value: resp.access_token, expires: Date.now() + (resp.expires_in || 3600) * 1000 };
+        try { sessionStorage.setItem('fitbitToken', JSON.stringify(fitbitToken)); } catch {}
+        resolve(fitbitToken.value);
+      },
+      error_callback: err => reject(new Error('Sign-in window closed or blocked (' + (err?.type || 'error') + ').'))
+    });
+    client.requestAccessToken({ prompt: '' });
+  });
+}
+
+async function fetchFitbitSessions(dateStr, token) {
+  const next = parseLocalDate(dateStr);
+  next.setDate(next.getDate() + 1);
+  const filter = `exercise.interval.civil_start_time >= "${dateStr}" AND ` +
+                 `exercise.interval.civil_start_time < "${localDateStr(next)}"`;
+  const url = `${FITBIT.api}/exercise/dataPoints?pageSize=25&filter=${encodeURIComponent(filter)}`;
+  const resp = await fetch(url, { headers: { Authorization: 'Bearer ' + token } });
+  if (resp.status === 401) {
+    fitbitToken = null;
+    try { sessionStorage.removeItem('fitbitToken'); } catch {}
+    throw new Error('Google sign-in expired. Tap again to sign back in.');
+  }
+  if (!resp.ok) {
+    let detail = '';
+    try { detail = (await resp.json()).error?.message || ''; } catch {}
+    throw new Error(`Fitbit request failed (${resp.status}). ${detail}`);
+  }
+  const data = await resp.json();
+  return (data.dataPoints || [])
+    .filter(dp => dp.exercise)
+    .sort((a, b) => new Date(a.exercise.interval.startTime) - new Date(b.exercise.interval.startTime));
+}
+
+function checkFitbit() {
+  const list = document.getElementById('fitbit-list');
+  const forDate = logDate;
+  list.innerHTML = '<p class="muted">Checking Fitbit…</p>';
+  getFitbitToken()
+    .then(token => fetchFitbitSessions(forDate, token))
+    .then(sessions => {
+      if (forDate !== logDate) return; // date changed while loading
+      fitbitSessions = sessions;
+      renderFitbitList();
+    })
+    .catch(err => {
+      list.innerHTML = '';
+      const p = document.createElement('p');
+      p.className = 'muted fitbit-error';
+      p.textContent = err.message;
+      list.appendChild(p);
+    });
+}
+
+function fitbitSessionInfo(dp) {
+  const ex = dp.exercise;
+  const start = new Date(ex.interval.startTime);
+  const activeSec = parseFloat(ex.activeDuration);
+  const minutes = Math.max(1, Math.round(activeSec > 0
+    ? activeSec / 60
+    : (new Date(ex.interval.endTime) - start) / 60000));
+  const m = ex.metricsSummary || {};
+  return {
+    id: dp.name || ex.interval.startTime,
+    name: ex.displayName || ex.exerciseType,
+    cardioType: FITBIT_CARDIO_MAP[ex.exerciseType] || 'Other',
+    isLift: FITBIT_LIFT_TYPES.has(ex.exerciseType),
+    minutes,
+    time: start.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }),
+    calories: m.caloriesKcal ? Math.round(m.caloriesKcal) : null,
+    avgHr: m.averageHeartRateBeatsPerMinute ? Number(m.averageHeartRateBeatsPerMinute) : null
+  };
+}
+
+function renderFitbitList() {
+  const list = document.getElementById('fitbit-list');
+  list.innerHTML = '';
+  if (!fitbitSessions.length) {
+    list.innerHTML = '<p class="muted">No Fitbit workouts recorded on this day.</p>';
+    return;
+  }
+  fitbitSessions.forEach(dp => {
+    const s = fitbitSessionInfo(dp);
+    const added = sessionCardio.some(c => c.fitbitId === s.id);
+    const row = document.createElement('div');
+    row.className = 'fitbit-item';
+    const details = [s.time, `${s.minutes} min`,
+      s.calories != null ? `${s.calories} cal` : '',
+      s.avgHr != null ? `${s.avgHr} bpm avg` : ''].filter(Boolean).join(' · ');
+    row.innerHTML = `
+      <div class="fitbit-info">
+        <div class="fitbit-name"></div>
+        <div class="fitbit-meta"></div>
+      </div>`;
+    row.querySelector('.fitbit-name').textContent =
+      s.name + (s.isLift ? ' (lifting)' : s.cardioType !== s.name ? ` → ${s.cardioType}` : '');
+    row.querySelector('.fitbit-meta').textContent = details;
+    if (!s.isLift) {
+      const btn = document.createElement('button');
+      btn.className = 'btn btn-secondary fitbit-add';
+      btn.textContent = added ? 'Added ✓' : 'Add';
+      btn.disabled = added;
+      btn.onclick = () => {
+        sessionCardio.push({ type: s.cardioType, minutes: s.minutes, fitbitId: s.id });
+        renderCardioList();
+        renderFitbitList();
+      };
+      row.appendChild(btn);
+    }
+    list.appendChild(row);
   });
 }
 

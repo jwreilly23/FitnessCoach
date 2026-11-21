@@ -13,6 +13,8 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <!-- EmailJS -->
   <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+  <!-- Google sign-in (for Fitbit data via the Google Health API) -->
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
 
@@ -102,6 +104,8 @@
       </div>
       <button class="btn btn-secondary mt-8" id="add-cardio-btn">Add Cardio</button>
       <div id="cardio-list" class="mt-8"></div>
+      <button class="btn btn-secondary mt-8 fitbit-btn" id="fitbit-check-btn">⌚ Check Fitbit for this day</button>
+      <div id="fitbit-list" class="fitbit-list"></div>
     </div>
 
     <!-- Notes -->

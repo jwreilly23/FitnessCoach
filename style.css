@@ -479,3 +479,18 @@ canvas { max-height: 220px; }
   background: none; border: none; color: var(--muted); padding: 6px; cursor: pointer; border-radius: 6px;
 }
 .history-delete:hover, .history-delete:active { color: var(--danger); }
+
+/* Fitbit sessions on the Log page */
+.fitbit-btn { width: 100%; }
+.fitbit-list { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.fitbit-list .muted { font-size: 13px; }
+.fitbit-error { color: var(--danger); }
+.fitbit-item {
+  display: flex; align-items: center; gap: 10px;
+  border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px;
+}
+.fitbit-info { flex: 1; min-width: 0; }
+.fitbit-name { font-size: 14px; font-weight: 600; }
+.fitbit-meta { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.fitbit-add { width: auto; flex: none; padding: 6px 12px; font-size: 13px; }
+.fitbit-add:disabled { opacity: 0.6; }
