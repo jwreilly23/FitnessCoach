@@ -923,7 +923,19 @@ async function renderHistory() {
     return;
   }
 
+  const byDate = groupByDate(workouts);
+  const shownDates = new Set();
+
   workouts.forEach(w => {
+    const dateStr = localDateStr(new Date(w.date));
+    if (!shownDates.has(dateStr)) {
+      shownDates.add(dateStr);
+      const st = dayStatusText(byDate[dateStr]);
+      const badge = document.createElement('div');
+      badge.className = 'history-day-status' + (st.ok ? ' ok' : '');
+      badge.textContent = st.text;
+      list.appendChild(badge);
+    }
     const day = exercises.days.find(d => d.id === w.dayId);
     const cardioMin = (w.cardio || []).reduce((s, c) => s + c.minutes, 0);
     const exNames = Object.keys(w.sets || {}).map(id => {
@@ -1019,6 +1031,19 @@ function chartDefaults() {
   return {
     responsive: true,
     maintainAspectRatio: false, // height comes from the .chart-box container
+    // Tooltips open on tap; tapping the same bar/point again closes it
+    events: ['click'],
+    onClick: (evt, elements, chart) => {
+      const idx = elements.length ? elements[0].index : null;
+      if (idx !== null && chart.$tipIndex === idx) {
+        chart.setActiveElements([]);
+        chart.tooltip.setActiveElements([], { x: 0, y: 0 });
+        chart.update();
+        chart.$tipIndex = null;
+      } else {
+        chart.$tipIndex = idx;
+      }
+    },
     plugins: { legend: { display: false } },
     scales: {
       x: { ticks: { color: '#888', font: { size: 11 } }, grid: { color: '#2e2e2e' } },
@@ -1190,11 +1215,27 @@ function groupByDate(workouts) {
 // a day) > Other (cardio only).
 function dayCategory(dayWorkouts) {
   if (!isWorkoutDay(dayWorkouts)) return null;
-  const assigned = dayWorkouts.find(w => isLiftWorkout(w) && w.dayId);
+  // If a date has several training-day entries, the most recently saved one wins
+  const assigned = dayWorkouts.filter(w => isLiftWorkout(w) && w.dayId)
+    .sort((a, b) => (b.id || 0) - (a.id || 0))[0];
   if (assigned) return 'D' + assigned.dayId;
   if (dayWorkouts.some(isLiftWorkout)) return 'lift';
   if (dayWorkouts.some(w => (w.cardio || []).length)) return 'other';
   return null;
+}
+
+// Plain-language status for a date, shown in History
+function dayStatusText(dayWorkouts) {
+  const cat = dayCategory(dayWorkouts);
+  if (cat) {
+    const label = cat === 'lift' ? 'Weightlifting' : cat === 'other' ? 'Other (cardio)'
+      : (() => { const d = exercises.days.find(d => 'D' + d.id === cat); return `D${d.id}: ${d.label}`; })();
+    return { ok: true, text: `Counts as a workout day: ${label}` };
+  }
+  const load = Math.round(dayLoad(dayWorkouts));
+  const liftMin = Math.max(0, ...dayWorkouts.map(w => w.fitbit?.isLift ? w.fitbit.minutes || 0 : 0));
+  return { ok: false, text: `Not a workout day: ${load} cardio load (needs ${WORKOUT_DAY_MIN_LOAD})` +
+    (liftMin ? `, ${liftMin} min lifting (needs over ${WORKOUT_DAY_MIN_LIFT})` : '') };
 }
 
 function renderWorkoutsChart(workouts) {
