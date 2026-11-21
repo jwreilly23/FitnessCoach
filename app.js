@@ -720,7 +720,11 @@ function renderWorkoutsChart(workouts) {
   progressCharts.workouts = new Chart(ctx, {
     type: 'bar',
     data: { labels: weeks.map(weekLabel), datasets },
-    options: stackedBarOptions('Workouts', '')
+    options: (() => {
+      const o = stackedBarOptions('Workouts', '');
+      o.scales.y.suggestedMax = 5; // weekly goal ceiling; grows past 5 if ever exceeded
+      return o;
+    })()
   });
 }
 
