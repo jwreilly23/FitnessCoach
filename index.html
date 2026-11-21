@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FitnessCoach</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+  <meta name="theme-color" content="#e85d04" />
+  <link rel="stylesheet" href="style.css" />
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <!-- EmailJS -->
+  <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+</head>
+<body>
+
+<!-- ── NAV ─────────────────────────────────────────────── -->
+<nav class="bottom-nav">
+  <button class="nav-btn active" data-view="home">
+    <svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
+    <span>Home</span>
+  </button>
+  <button class="nav-btn" data-view="log">
+    <svg viewBox="0 0 24 24"><path d="M19 3H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2V5a2 2 0 00-2-2zm-7 14H8v-2h4v2zm4-4H8v-2h8v2zm0-4H8V7h8v2z"/></svg>
+    <span>Log</span>
+  </button>
+  <button class="nav-btn" data-view="history">
+    <svg viewBox="0 0 24 24"><path d="M13 3a9 9 0 00-9 9H1l3.89 3.89.07.14L9 12H6a7 7 0 107-7v2a5 5 0 11-5 5H6a7 7 0 007-7z"/></svg>
+    <span>History</span>
+  </button>
+  <button class="nav-btn" data-view="progress">
+    <svg viewBox="0 0 24 24"><path d="M3 13h2v7H3zm4-4h2v11H7zm4-4h2v15h-2zm4 8h2v7h-2zm4-4h2v11h-2z"/></svg>
+    <span>Progress</span>
+  </button>
+  <button class="nav-btn" data-view="settings">
+    <svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94s-.02-.64-.07-.94l2.03-1.58a.49.49 0 00.12-.61l-1.92-3.32a.488.488 0 00-.59-.22l-2.39.96a6.9 6.9 0 00-1.62-.94l-.36-2.54a.484.484 0 00-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87a.48.48 0 00.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58a.49.49 0 00-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.37 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.57 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.48.48 0 00-.12-.61l-2.01-1.58zM12 15.6a3.6 3.6 0 110-7.2 3.6 3.6 0 010 7.2z"/></svg>
+    <span>Settings</span>
+  </button>
+</nav>
+
+<!-- ── VIEWS ───────────────────────────────────────────── -->
+<main>
+
+  <!-- HOME -->
+  <section id="view-home" class="view active">
+    <header class="page-header">
+      <h1>FitnessCoach</h1>
+      <p id="home-date" class="subtitle"></p>
+    </header>
+    <div class="card" id="next-workout-card">
+      <div class="card-label">NEXT WORKOUT</div>
+      <h2 id="next-workout-title">Loading…</h2>
+      <p id="next-workout-sub" class="muted"></p>
+      <button class="btn btn-primary" id="start-workout-btn">Start Workout</button>
+    </div>
+    <div class="card" id="week-summary-card">
+      <div class="card-label">THIS WEEK</div>
+      <div class="stat-row" id="week-stats"></div>
+    </div>
+    <div class="card" id="streak-card">
+      <div class="card-label">STREAK</div>
+      <div id="streak-display" class="big-number">0 <span>days</span></div>
+    </div>
+  </section>
+
+  <!-- LOG WORKOUT -->
+  <section id="view-log" class="view">
+    <header class="page-header">
+      <h2 id="log-title">Log Workout</h2>
+    </header>
+
+    <!-- Day selector tabs -->
+    <div class="day-tabs" id="day-tabs"></div>
+
+    <!-- Exercise list for selected day -->
+    <div id="exercise-list" class="exercise-list"></div>
+
+    <!-- Add alternate exercise -->
+    <div class="card alternate-section">
+      <div class="card-label">ADD ALTERNATE EXERCISE</div>
+      <select id="alternate-select" class="input-field">
+        <option value="">— select —</option>
+      </select>
+      <button class="btn btn-secondary" id="add-alternate-btn">Add</button>
+    </div>
+
+    <!-- Cardio -->
+    <div class="card">
+      <div class="card-label">ADD CARDIO</div>
+      <div class="row gap-8">
+        <select id="cardio-type" class="input-field flex-1">
+          <option value="">Type…</option>
+        </select>
+        <input id="cardio-minutes" type="number" min="1" placeholder="min" class="input-field w-80" />
+      </div>
+      <button class="btn btn-secondary mt-8" id="add-cardio-btn">Add Cardio</button>
+      <div id="cardio-list" class="mt-8"></div>
+    </div>
+
+    <!-- Notes -->
+    <div class="card">
+      <div class="card-label">NOTES</div>
+      <textarea id="workout-notes" class="input-field" rows="3" placeholder="Optional notes…"></textarea>
+    </div>
+
+    <button class="btn btn-primary btn-full" id="save-workout-btn">Save Workout</button>
+  </section>
+
+  <!-- HISTORY -->
+  <section id="view-history" class="view">
+    <header class="page-header">
+      <h2>History</h2>
+    </header>
+    <div id="history-list"></div>
+  </section>
+
+  <!-- PROGRESS -->
+  <section id="view-progress" class="view">
+    <header class="page-header">
+      <h2>Progress</h2>
+    </header>
+    <div class="card">
+      <div class="card-label">WORKOUTS PER WEEK</div>
+      <canvas id="chart-workouts"></canvas>
+    </div>
+    <div class="card">
+      <div class="card-label">CARDIO MINUTES PER WEEK</div>
+      <canvas id="chart-cardio"></canvas>
+    </div>
+    <div class="card">
+      <div class="card-label">EXERCISE WEIGHT PROGRESSION</div>
+      <select id="progress-exercise-select" class="input-field mb-8">
+        <option value="">Select exercise…</option>
+      </select>
+      <canvas id="chart-weight"></canvas>
+    </div>
+  </section>
+
+  <!-- SETTINGS -->
+  <section id="view-settings" class="view">
+    <header class="page-header">
+      <h2>Settings</h2>
+    </header>
+    <div class="card">
+      <div class="card-label">WEEKLY RECAP EMAIL</div>
+      <label class="field-label">Your Email</label>
+      <input id="settings-email" type="email" class="input-field" placeholder="you@example.com" />
+      <label class="field-label mt-8">EmailJS Public Key</label>
+      <input id="settings-emailjs-key" type="text" class="input-field" placeholder="EmailJS public key" />
+      <label class="field-label mt-8">EmailJS Service ID</label>
+      <input id="settings-emailjs-service" type="text" class="input-field" placeholder="service_xxxxxxx" />
+      <label class="field-label mt-8">EmailJS Template ID</label>
+      <input id="settings-emailjs-template" type="text" class="input-field" placeholder="template_xxxxxxx" />
+      <button class="btn btn-secondary mt-8" id="send-recap-btn">Send Recap Now</button>
+      <p id="recap-status" class="muted mt-4"></p>
+    </div>
+    <div class="card">
+      <div class="card-label">DATA</div>
+      <button class="btn btn-secondary" id="export-btn">Export All Data (JSON)</button>
+      <button class="btn btn-danger mt-8" id="clear-data-btn">Clear All Data</button>
+    </div>
+  </section>
+
+</main>
+
+<!-- ── EXERCISE DETAIL MODAL ───────────────────────────── -->
+<div id="exercise-modal" class="modal hidden">
+  <div class="modal-backdrop"></div>
+  <div class="modal-box">
+    <button class="modal-close" id="modal-close-btn">✕</button>
+    <h3 id="modal-exercise-name"></h3>
+    <div class="modal-anim" role="img" aria-label="Exercise form: start and end position">
+      <img id="modal-frame-0" src="" alt="" />
+      <img id="modal-frame-1" src="" alt="" class="frame-end" />
+    </div>
+    <p id="modal-muscles" class="muted"></p>
+    <a id="modal-youtube" href="#" target="_blank" rel="noopener" class="btn btn-secondary btn-full mt-8">
+      ▶ Watch on YouTube
+    </a>
+  </div>
+</div>
+
+<!-- ── TOAST ───────────────────────────────────────────── -->
+<div id="toast" class="toast hidden"></div>
+
+<script src="app.js"></script>
+</body>
+</html>

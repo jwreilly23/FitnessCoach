@@ -1,0 +1,663 @@
+{
+  "days": [
+    {
+      "id": 1,
+      "label": "Chest / Triceps",
+      "muscles": [
+        "chest",
+        "triceps"
+      ],
+      "exercises": [
+        {
+          "id": "bench-press",
+          "name": "Barbell Bench Press",
+          "primary": true,
+          "muscles": [
+            "chest",
+            "triceps",
+            "front-deltoid"
+          ],
+          "youtube": "https://www.youtube.com/watch?v=rT7DgCr-3pg",
+          "images": [
+            "images/exercises/bench-press/0.jpg",
+            "images/exercises/bench-press/1.jpg"
+          ]
+        },
+        {
+          "id": "incline-bench-press",
+          "name": "Incline Barbell Bench Press",
+          "primary": true,
+          "muscles": [
+            "upper-chest",
+            "triceps",
+            "front-deltoid"
+          ],
+          "youtube": "https://www.youtube.com/watch?v=DbFgADa2PL8",
+          "images": [
+            "images/exercises/incline-bench-press/0.jpg",
+            "images/exercises/incline-bench-press/1.jpg"
+          ]
+        },
+        {
+          "id": "cable-flyes",
+          "name": "Cable Chest Flyes",
+          "primary": true,
+          "muscles": [
+            "chest"
+          ],
+          "youtube": "https://www.youtube.com/watch?v=taI4XduLpTk",
+          "images": [
+            "images/exercises/cable-flyes/0.jpg",
+            "images/exercises/cable-flyes/1.jpg"
+          ]
+        },
+        {
+          "id": "dips",
+          "name": "Chest Dips",
+          "primary": true,
+          "muscles": [
+            "chest",
+            "triceps"
+          ],
+          "youtube": "https://www.youtube.com/watch?v=2z8JmcrW-As",
+          "images": [
+            "images/exercises/dips/0.jpg",
+            "images/exercises/dips/1.jpg"
+          ]
+        },
+        {
+          "id": "decline-bench-press",
+          "name": "Decline Barbell Bench Press",
+          "primary": false,
+          "muscles": [
+            "lower-chest",
+            "triceps"
+          ],
+          "youtube": "https://www.youtube.com/watch?v=LfyQTqKoUJw",
+          "images": [
+            "images/exercises/decline-bench-press/0.jpg",
+            "images/exercises/decline-bench-press/1.jpg"
+          ]
+        },
+        {
+          "id": "db-bench-press",
+          "name": "Dumbbell Bench Press",
+          "primary": false,
+          "muscles": [
+            "chest",
+            "triceps"
+          ],
+          "youtube": "https://www.youtube.com/watch?v=VmB1G1K7v94",
+          "images": [
+            "images/exercises/db-bench-press/0.jpg",
+            "images/exercises/db-bench-press/1.jpg"
+          ]
+        },
+        {
+          "id": "incline-db-flyes",
+          "name": "Incline Dumbbell Flyes",
+          "primary": false,
+          "muscles": [
+            "upper-chest"
+          ],
+          "youtube": "https://www.youtube.com/watch?v=eozdVDA78K0",
+          "images": [
+            "images/exercises/incline-db-flyes/0.jpg",
+            "images/exercises/incline-db-flyes/1.jpg"
+          ]
+        },
+        {
+          "id": "tricep-pushdown",
+          "name": "Tricep Pushdown (Cable)",
+          "primary": true,
+          "muscles": [
+            "triceps"
+          ],
+          "youtube": "https://www.youtube.com/watch?v=2-LAMcpzODU",
+          "images": [
+            "images/exercises/tricep-pushdown/0.jpg",
+            "images/exercises/tricep-pushdown/1.jpg"
+          ]
+        },
+        {
+          "id": "skull-crushers",
+          "name": "Skull Crushers",
+          "primary": true,
+          "muscles": [
+            "triceps"
+          ],
+          "youtube": "https://www.youtube.com/watch?v=NIKYmMpsDhI",
+          "images": [
+            "images/exercises/skull-crushers/0.jpg",
+            "images/exercises/skull-crushers/1.jpg"
+          ]
+        },
+        {
+          "id": "overhead-tricep-ext",
+          "name": "Overhead Tricep Extension",
+          "primary": false,
+          "muscles": [
+            "triceps"
+          ],
+          "youtube": "https://www.youtube.com/watch?v=YbX7Wd8jQ-Q",
+          "images": [
+            "images/exercises/overhead-tricep-ext/0.jpg",
+            "images/exercises/overhead-tricep-ext/1.jpg"
+          ]
+        },
+        {
+          "id": "close-grip-bench",
+          "name": "Close-Grip Bench Press",
+          "primary": false,
+          "muscles": [
+            "triceps",
+            "chest"
+          ],
+          "youtube": "https://www.youtube.com/watch?v=nEF0bv2FW94",
+          "images": [
+            "images/exercises/close-grip-bench/0.jpg",
+            "images/exercises/close-grip-bench/1.jpg"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "label": "Legs",
+      "muscles": [
+        "quads",
+        "hamstrings",
+        "glutes",
+        "calves"
+      ],
+      "exercises": [
+        {
+          "id": "barbell-squat",
+          "name": "Barbell Back Squat",
+          "primary": true,
+          "muscles": [
+            "quads",
+            "glutes",
+            "hamstrings"
+          ],
+          "youtube": "https://www.youtube.com/watch?v=ultWZbUMPL8",
+          "images": [
+            "images/exercises/barbell-squat/0.jpg",
+            "images/exercises/barbell-squat/1.jpg"
+          ]
+        },
+        {
+          "id": "leg-press",
+          "name": "Leg Press",
+          "primary": true,
+          "muscles": [
+            "quads",
+            "glutes"
+          ],
+          "youtube": "https://www.youtube.com/watch?v=IZxyjW7MPJQ",
+          "images": [
+            "images/exercises/leg-press/0.jpg",
+            "images/exercises/leg-press/1.jpg"
+          ]
+        },
+        {
+          "id": "romanian-deadlift",
+          "name": "Romanian Deadlift",
+          "primary": true,
+          "muscles": [
+            "hamstrings",
+            "glutes",
+            "lower-back"
+          ],
+          "youtube": "https://www.youtube.com/watch?v=jEy_czb3RKA",
+          "images": [
+            "images/exercises/romanian-deadlift/0.jpg",
+            "images/exercises/romanian-deadlift/1.jpg"
+          ]
+        },
+        {
+          "id": "leg-curl",
+          "name": "Lying Leg Curl",
+          "primary": true,
+          "muscles": [
+            "hamstrings"
+          ],
+          "youtube": "https://www.youtube.com/watch?v=ELOCsoDSmrg",
+          "images": [
+            "images/exercises/leg-curl/0.jpg",
+            "images/exercises/leg-curl/1.jpg"
+          ]
+        },
+        {
+          "id": "leg-extension",
+          "name": "Leg Extension",
+          "primary": false,
+          "muscles": [
+            "quads"
+          ],
+          "youtube": "https://www.youtube.com/watch?v=YyvSfVjQeL0",
+          "images": [
+            "images/exercises/leg-extension/0.jpg",
+            "images/exercises/leg-extension/1.jpg"
+          ]
+        },
+        {
+          "id": "bulgarian-split-squat",
+          "name": "Bulgarian Split Squat",
+          "primary": false,
+          "muscles": [
+            "quads",
+            "glutes"
+          ],
+          "youtube": "https://www.youtube.com/watch?v=2C-uNgKwPLE",
+          "images": [
+            "images/exercises/bulgarian-split-squat/0.jpg",
+            "images/exercises/bulgarian-split-squat/1.jpg"
+          ]
+        },
+        {
+          "id": "hack-squat",
+          "name": "Hack Squat",
+          "primary": false,
+          "muscles": [
+            "quads",
+            "glutes"
+          ],
+          "youtube": "https://www.youtube.com/watch?v=0tn5K9NlCfo",
+          "images": [
+            "images/exercises/hack-squat/0.jpg",
+            "images/exercises/hack-squat/1.jpg"
+          ]
+        },
+        {
+          "id": "calf-raises",
+          "name": "Standing Calf Raises",
+          "primary": true,
+          "muscles": [
+            "calves"
+          ],
+          "youtube": "https://www.youtube.com/watch?v=-M4-G8p8fmc",
+          "images": [
+            "images/exercises/calf-raises/0.jpg",
+            "images/exercises/calf-raises/1.jpg"
+          ]
+        },
+        {
+          "id": "lunges",
+          "name": "Walking Lunges",
+          "primary": false,
+          "muscles": [
+            "quads",
+            "glutes",
+            "hamstrings"
+          ],
+          "youtube": "https://www.youtube.com/watch?v=L8fvypPrzzs",
+          "images": [
+            "images/exercises/lunges/0.jpg",
+            "images/exercises/lunges/1.jpg"
+          ]
+        },
+        {
+          "id": "sumo-squat",
+          "name": "Sumo Squat",
+          "primary": false,
+          "muscles": [
+            "quads",
+            "glutes",
+            "adductors"
+          ],
+          "youtube": "https://www.youtube.com/watch?v=t3JRTQJsDYM",
+          "images": [
+            "images/exercises/sumo-squat/0.jpg",
+            "images/exercises/sumo-squat/1.jpg"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "label": "Back / Biceps",
+      "muscles": [
+        "lats",
+        "traps",
+        "rhomboids",
+        "biceps"
+      ],
+      "exercises": [
+        {
+          "id": "deadlift",
+          "name": "Conventional Deadlift",
+          "primary": true,
+          "muscles": [
+            "lower-back",
+            "hamstrings",
+            "glutes",
+            "traps"
+          ],
+          "youtube": "https://www.youtube.com/watch?v=op9kVnSso6Q",
+          "images": [
+            "images/exercises/deadlift/0.jpg",
+            "images/exercises/deadlift/1.jpg"
+          ]
+        },
+        {
+          "id": "lat-pulldown",
+          "name": "Lat Pulldown",
+          "primary": true,
+          "muscles": [
+            "lats",
+            "biceps"
+          ],
+          "youtube": "https://www.youtube.com/watch?v=CAwf7n6Luuc",
+          "images": [
+            "images/exercises/lat-pulldown/0.jpg",
+            "images/exercises/lat-pulldown/1.jpg"
+          ]
+        },
+        {
+          "id": "seated-cable-row",
+          "name": "Seated Cable Row",
+          "primary": true,
+          "muscles": [
+            "lats",
+            "rhomboids",
+            "biceps"
+          ],
+          "youtube": "https://www.youtube.com/watch?v=GZbfZ033f74",
+          "images": [
+            "images/exercises/seated-cable-row/0.jpg",
+            "images/exercises/seated-cable-row/1.jpg"
+          ]
+        },
+        {
+          "id": "bent-over-row",
+          "name": "Barbell Bent-Over Row",
+          "primary": true,
+          "muscles": [
+            "lats",
+            "rhomboids",
+            "traps",
+            "biceps"
+          ],
+          "youtube": "https://www.youtube.com/watch?v=FWJR5Ve8bnQ",
+          "images": [
+            "images/exercises/bent-over-row/0.jpg",
+            "images/exercises/bent-over-row/1.jpg"
+          ]
+        },
+        {
+          "id": "pullups",
+          "name": "Pull-Ups",
+          "primary": false,
+          "muscles": [
+            "lats",
+            "biceps"
+          ],
+          "youtube": "https://www.youtube.com/watch?v=eGo4IYlbE5g",
+          "images": [
+            "images/exercises/pullups/0.jpg",
+            "images/exercises/pullups/1.jpg"
+          ]
+        },
+        {
+          "id": "db-row",
+          "name": "Single-Arm Dumbbell Row",
+          "primary": false,
+          "muscles": [
+            "lats",
+            "rhomboids"
+          ],
+          "youtube": "https://www.youtube.com/watch?v=pYcpY20QaE8",
+          "images": [
+            "images/exercises/db-row/0.jpg",
+            "images/exercises/db-row/1.jpg"
+          ]
+        },
+        {
+          "id": "face-pulls",
+          "name": "Face Pulls",
+          "primary": false,
+          "muscles": [
+            "rear-deltoid",
+            "traps",
+            "rhomboids"
+          ],
+          "youtube": "https://www.youtube.com/watch?v=rep-qVOkqgk",
+          "images": [
+            "images/exercises/face-pulls/0.jpg",
+            "images/exercises/face-pulls/1.jpg"
+          ]
+        },
+        {
+          "id": "barbell-curl",
+          "name": "Barbell Curl",
+          "primary": true,
+          "muscles": [
+            "biceps"
+          ],
+          "youtube": "https://www.youtube.com/watch?v=kwG2ipFRgfo",
+          "images": [
+            "images/exercises/barbell-curl/0.jpg",
+            "images/exercises/barbell-curl/1.jpg"
+          ]
+        },
+        {
+          "id": "db-curl",
+          "name": "Dumbbell Curl",
+          "primary": true,
+          "muscles": [
+            "biceps"
+          ],
+          "youtube": "https://www.youtube.com/watch?v=sAq_ocpRh_I",
+          "images": [
+            "images/exercises/db-curl/0.jpg",
+            "images/exercises/db-curl/1.jpg"
+          ]
+        },
+        {
+          "id": "hammer-curl",
+          "name": "Hammer Curl",
+          "primary": false,
+          "muscles": [
+            "biceps",
+            "brachialis"
+          ],
+          "youtube": "https://www.youtube.com/watch?v=zC3nLlEvin4",
+          "images": [
+            "images/exercises/hammer-curl/0.jpg",
+            "images/exercises/hammer-curl/1.jpg"
+          ]
+        },
+        {
+          "id": "preacher-curl",
+          "name": "Preacher Curl",
+          "primary": false,
+          "muscles": [
+            "biceps"
+          ],
+          "youtube": "https://www.youtube.com/watch?v=fIWP-FRFNU0",
+          "images": [
+            "images/exercises/preacher-curl/0.jpg",
+            "images/exercises/preacher-curl/1.jpg"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "label": "Shoulders / Abs",
+      "muscles": [
+        "deltoids",
+        "traps",
+        "abs"
+      ],
+      "exercises": [
+        {
+          "id": "ohp",
+          "name": "Overhead Press (Barbell)",
+          "primary": true,
+          "muscles": [
+            "front-deltoid",
+            "lateral-deltoid",
+            "triceps"
+          ],
+          "youtube": "https://www.youtube.com/watch?v=2yjwXTZQDDI",
+          "images": [
+            "images/exercises/ohp/0.jpg",
+            "images/exercises/ohp/1.jpg"
+          ]
+        },
+        {
+          "id": "db-shoulder-press",
+          "name": "Dumbbell Shoulder Press",
+          "primary": true,
+          "muscles": [
+            "front-deltoid",
+            "lateral-deltoid",
+            "triceps"
+          ],
+          "youtube": "https://www.youtube.com/watch?v=qEwKCR5JCog",
+          "images": [
+            "images/exercises/db-shoulder-press/0.jpg",
+            "images/exercises/db-shoulder-press/1.jpg"
+          ]
+        },
+        {
+          "id": "lateral-raises",
+          "name": "Lateral Raises",
+          "primary": true,
+          "muscles": [
+            "lateral-deltoid"
+          ],
+          "youtube": "https://www.youtube.com/watch?v=3VcKaXpzqRo",
+          "images": [
+            "images/exercises/lateral-raises/0.jpg",
+            "images/exercises/lateral-raises/1.jpg"
+          ]
+        },
+        {
+          "id": "rear-delt-flyes",
+          "name": "Rear Delt Flyes",
+          "primary": true,
+          "muscles": [
+            "rear-deltoid",
+            "rhomboids"
+          ],
+          "youtube": "https://www.youtube.com/watch?v=EA7u4Q_8HQ0",
+          "images": [
+            "images/exercises/rear-delt-flyes/0.jpg",
+            "images/exercises/rear-delt-flyes/1.jpg"
+          ]
+        },
+        {
+          "id": "arnold-press",
+          "name": "Arnold Press",
+          "primary": false,
+          "muscles": [
+            "front-deltoid",
+            "lateral-deltoid"
+          ],
+          "youtube": "https://www.youtube.com/watch?v=6Z15_WdXmVw",
+          "images": [
+            "images/exercises/arnold-press/0.jpg",
+            "images/exercises/arnold-press/1.jpg"
+          ]
+        },
+        {
+          "id": "front-raises",
+          "name": "Front Raises",
+          "primary": false,
+          "muscles": [
+            "front-deltoid"
+          ],
+          "youtube": "https://www.youtube.com/watch?v=gkn2L8yzmU4",
+          "images": [
+            "images/exercises/front-raises/0.jpg",
+            "images/exercises/front-raises/1.jpg"
+          ]
+        },
+        {
+          "id": "upright-row",
+          "name": "Upright Row",
+          "primary": false,
+          "muscles": [
+            "lateral-deltoid",
+            "traps"
+          ],
+          "youtube": "https://www.youtube.com/watch?v=UxlyJSvF_Y8",
+          "images": [
+            "images/exercises/upright-row/0.jpg",
+            "images/exercises/upright-row/1.jpg"
+          ]
+        },
+        {
+          "id": "plank",
+          "name": "Plank",
+          "primary": true,
+          "muscles": [
+            "abs",
+            "core"
+          ],
+          "youtube": "https://www.youtube.com/watch?v=pvIjsG5Svck",
+          "images": [
+            "images/exercises/plank/0.jpg",
+            "images/exercises/plank/1.jpg"
+          ]
+        },
+        {
+          "id": "cable-crunch",
+          "name": "Cable Crunch",
+          "primary": true,
+          "muscles": [
+            "abs"
+          ],
+          "youtube": "https://www.youtube.com/watch?v=2fbujeH3F0E",
+          "images": [
+            "images/exercises/cable-crunch/0.jpg",
+            "images/exercises/cable-crunch/1.jpg"
+          ]
+        },
+        {
+          "id": "leg-raises",
+          "name": "Hanging Leg Raises",
+          "primary": false,
+          "muscles": [
+            "abs",
+            "hip-flexors"
+          ],
+          "youtube": "https://www.youtube.com/watch?v=Pr1ieGZ5atk",
+          "images": [
+            "images/exercises/leg-raises/0.jpg",
+            "images/exercises/leg-raises/1.jpg"
+          ]
+        },
+        {
+          "id": "russian-twists",
+          "name": "Russian Twists",
+          "primary": false,
+          "muscles": [
+            "obliques",
+            "abs"
+          ],
+          "youtube": "https://www.youtube.com/watch?v=wkD8rjkodUI",
+          "images": [
+            "images/exercises/russian-twists/0.jpg",
+            "images/exercises/russian-twists/1.jpg"
+          ]
+        }
+      ]
+    }
+  ],
+  "cardioTypes": [
+    "Treadmill",
+    "Stairmaster",
+    "Elliptical",
+    "Rowing Machine",
+    "Stationary Bike",
+    "Running (outdoor)",
+    "Cycling (outdoor)",
+    "Swimming",
+    "Jump Rope",
+    "Other"
+  ]
+}

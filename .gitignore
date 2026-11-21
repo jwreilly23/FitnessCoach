@@ -1,0 +1,7 @@
+# Personal Claude Code permissions (machine-specific)
+.claude/settings.local.json
+
+# OS / editor clutter
+Thumbs.db
+.DS_Store
+desktop.ini

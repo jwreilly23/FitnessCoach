@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Full-bleed background so the icon also works as a maskable (Android adaptive) icon -->
+  <rect width="512" height="512" fill="#e85d04"/>
+  <!-- Dumbbell, kept inside the central 60% safe zone -->
+  <g fill="#fff" transform="rotate(-35 256 256)">
+    <rect x="176" y="238" width="160" height="36" rx="10"/>
+    <rect x="128" y="176" width="44" height="160" rx="14"/>
+    <rect x="340" y="176" width="44" height="160" rx="14"/>
+    <rect x="96" y="204" width="34" height="104" rx="12"/>
+    <rect x="382" y="204" width="34" height="104" rx="12"/>
+  </g>
+</svg>
