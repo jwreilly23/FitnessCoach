@@ -1018,6 +1018,7 @@ async function refreshProgress() {
 function chartDefaults() {
   return {
     responsive: true,
+    maintainAspectRatio: false, // height comes from the .chart-box container
     plugins: { legend: { display: false } },
     scales: {
       x: { ticks: { color: '#888', font: { size: 11 } }, grid: { color: '#2e2e2e' } },
@@ -1233,15 +1234,34 @@ function cardioGroup(type) {
 function renderCardioChart(workouts) {
   const periods = periodBuckets();
   const perEntry = rangeUnit() === 'week';
+
+  // Monthly view: types under 10% of the range's cardio minutes fold into Other
+  // so the legend only lists the ones that matter
+  const minor = new Set();
+  if (!perEntry) {
+    const totals = {};
+    let all = 0;
+    workouts.forEach(w => {
+      if (!periods.includes(periodKey(w))) return;
+      (w.cardio || []).forEach(c => {
+        const m = Number(c.minutes) || 0;
+        totals[cardioGroup(c.type)] = (totals[cardioGroup(c.type)] || 0) + m;
+        all += m;
+      });
+    });
+    Object.entries(totals).forEach(([g, m]) => { if (all && m / all < 0.10) minor.add(g); });
+  }
+  const groupFor = type => { const g = cardioGroup(type); return minor.has(g) ? 'Other' : g; };
+
   const entries = {}; // group -> { period -> [minutes, ...] } in logged order
   [...workouts].sort((a, b) => new Date(a.date) - new Date(b.date)).forEach(w =>
     (w.cardio || []).forEach(c => {
-      const g = cardioGroup(c.type), p = periodKey(w);
+      const g = groupFor(c.type), p = periodKey(w);
       entries[g] ??= {};
       (entries[g][p] ??= []).push(Number(c.minutes) || 0);
     }));
 
-  const groups = exercises.cardioTypes.map(cardioGroup)
+  const groups = [...exercises.cardioTypes.map(cardioGroup), 'Other']
     .filter((g, i, arr) => arr.indexOf(g) === i && entries[g] && periods.some(p => entries[g][p]))
     .sort((a, b) => (a === 'Other') - (b === 'Other'));
 
