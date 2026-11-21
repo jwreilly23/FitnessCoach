@@ -151,7 +151,7 @@ async function renderHome() {
   const thisWeek  = workouts.filter(w => new Date(w.date) >= weekStart);
   const cardioMin = thisWeek.reduce((s, w) => s + (w.cardio || []).reduce((a, c) => a + c.minutes, 0), 0);
   document.getElementById('week-stats').innerHTML = `
-    <div class="stat-box"><div class="stat-val">${thisWeek.length}</div><div class="stat-lbl">Workouts</div></div>
+    <div class="stat-box"><div class="stat-val">${thisWeek.filter(hasLifting).length}</div><div class="stat-lbl">Workouts</div></div>
     <div class="stat-box"><div class="stat-val">${cardioMin}</div><div class="stat-lbl">Cardio min</div></div>
     <div class="stat-box"><div class="stat-val">${Math.round(cardioMin/60*10)/10}</div><div class="stat-lbl">Cardio hrs</div></div>
   `;
@@ -162,7 +162,11 @@ async function renderHome() {
     `${streak} <span>${streak === 1 ? 'day' : 'days'}</span>`;
 }
 
+// A saved entry with lifting sets (cardio-only entries don't count as a training day)
+const hasLifting = w => Object.keys(w.sets || {}).length > 0;
+
 async function getNextDay(workouts) {
+  workouts = workouts.filter(hasLifting);
   // Find the last completed day; suggest next in rotation
   if (!workouts.length) return 1;
   const last = workouts.sort((a, b) => new Date(b.date) - new Date(a.date))[0];
@@ -447,6 +451,15 @@ function renderCardioList() {
 
 // ── SAVE WORKOUT ─────────────────────────────────────────
 async function saveWorkout() {
+  // Include cardio that was entered but not yet added with "Add Cardio"
+  const pendingType = document.getElementById('cardio-type').value;
+  const pendingMin  = parseInt(document.getElementById('cardio-minutes').value);
+  if (pendingType && pendingMin > 0) {
+    sessionCardio.push({ type: pendingType, minutes: pendingMin });
+    document.getElementById('cardio-minutes').value = '';
+    renderCardioList();
+  }
+
   const hasSets = Object.values(sessionSets).some(s =>
     s.some(r => r.reps || r.weight)
   );
@@ -509,7 +522,7 @@ async function renderHistory() {
     el.innerHTML = `
       <div class="history-date">${new Date(w.date).toLocaleDateString('en-US',
         { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' })}</div>
-      <div class="history-title">Day ${w.dayId}: ${day?.label || '?'}</div>
+      <div class="history-title">${hasLifting(w) ? `Day ${w.dayId}: ${day?.label || '?'}` : 'Cardio'}</div>
       <div class="history-meta">
         ${exNames.length} exercise${exNames.length === 1 ? '' : 's'}
         ${cardioMin ? ` · ${cardioMin} min cardio` : ''}
@@ -638,7 +651,7 @@ function renderWorkoutsChart(workouts) {
   const weeks = weekBuckets(workouts);
   const datasets = exercises.days.map((day, i) => {
     const data = weeks.map(wk =>
-      workouts.filter(w => w.dayId === day.id && weekKey(w) === wk).length);
+      workouts.filter(w => hasLifting(w) && w.dayId === day.id && weekKey(w) === wk).length);
     return stackedDataset(`D${day.id}: ${day.label}`, data, SERIES_COLORS[i] || OTHER_COLOR);
   });
 
