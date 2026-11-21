@@ -1093,10 +1093,14 @@ function chartDefaults() {
     onClick: (evt, elements, chart) => {
       const idx = elements.length ? elements[0].index : null;
       if (idx !== null && chart.$tipIndex === idx) {
-        chart.setActiveElements([]);
-        chart.tooltip.setActiveElements([], { x: 0, y: 0 });
-        chart.update();
         chart.$tipIndex = null;
+        // Chart.js re-opens the tooltip for this same tap after onClick runs,
+        // so close it once that's done
+        setTimeout(() => {
+          chart.setActiveElements([]);
+          chart.tooltip.setActiveElements([], { x: 0, y: 0 });
+          chart.update();
+        }, 0);
       } else {
         chart.$tipIndex = idx;
       }
