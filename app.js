@@ -188,8 +188,7 @@ async function renderHome() {
   const thisWeek  = workouts.filter(w => new Date(w.date) >= weekStart);
   const cardioMin = thisWeek.reduce((s, w) => s + (w.cardio || []).reduce((a, c) => a + c.minutes, 0), 0);
   document.getElementById('week-stats').innerHTML = `
-    <div class="stat-box"><div class="stat-val">${new Set(thisWeek.filter(w => isLiftWorkout(w) || (w.cardio || []).length)
-      .map(w => localDateStr(new Date(w.date)))).size}</div><div class="stat-lbl">Workout days</div></div>
+    <div class="stat-box"><div class="stat-val">${Object.values(groupByDate(thisWeek)).filter(isWorkoutDay).length}</div><div class="stat-lbl">Workout days</div></div>
     <div class="stat-box"><div class="stat-val">${cardioMin}</div><div class="stat-lbl">Cardio min</div></div>
     <div class="stat-box"><div class="stat-val">${Math.round(cardioMin/60*10)/10}</div><div class="stat-lbl">Cardio hrs</div></div>
   `;
@@ -1157,11 +1156,39 @@ function drawChart(key, canvasId, labels, datasets, options) {
   progressCharts[key] = new Chart(ctx, { type: 'bar', data: { labels, datasets }, options });
 }
 
-// Workout DAYS per period: each calendar day counts once, so lifting followed
-// by cardio is one day, not two. A day is labelled by what it included, in
-// priority order: training day D1-D4 > Weightlifting (lifting not assigned to
+// A day counts as a workout day if it has 30+ cardio load (Active Zone Minutes
+// from Fitbit, across cardio and lifting), or more than 30 min of weightlifting.
+// Cardio typed in without Fitbit data counts its minutes as load; lifting logged
+// with sets but no Fitbit duration counts as a full session.
+const WORKOUT_DAY_MIN_LOAD = 30;
+const WORKOUT_DAY_MIN_LIFT = 30;
+
+function dayLoad(dayWorkouts) {
+  return dayWorkouts.reduce((sum, w) =>
+    sum + (w.fitbit?.azm || 0) +
+    (w.cardio || []).reduce((s, c) => s + (c.azm ?? (c.fitbitId ? 0 : Number(c.minutes) || 0)), 0), 0);
+}
+
+function isWorkoutDay(dayWorkouts) {
+  const liftedEnough = dayWorkouts.some(w =>
+    (w.fitbit?.isLift && w.fitbit.minutes > WORKOUT_DAY_MIN_LIFT) ||
+    (hasLifting(w) && !w.fitbit?.minutes));
+  return liftedEnough || dayLoad(dayWorkouts) >= WORKOUT_DAY_MIN_LOAD;
+}
+
+// Group workouts by local calendar date
+function groupByDate(workouts) {
+  const byDate = {};
+  workouts.forEach(w => (byDate[localDateStr(new Date(w.date))] ??= []).push(w));
+  return byDate;
+}
+
+// Workout DAYS per period: each qualifying calendar day counts once, so lifting
+// followed by cardio is one day, not two. A day is labelled by what it included,
+// in priority order: training day D1-D4 > Weightlifting (lifting not assigned to
 // a day) > Other (cardio only).
 function dayCategory(dayWorkouts) {
+  if (!isWorkoutDay(dayWorkouts)) return null;
   const assigned = dayWorkouts.find(w => isLiftWorkout(w) && w.dayId);
   if (assigned) return 'D' + assigned.dayId;
   if (dayWorkouts.some(isLiftWorkout)) return 'lift';
@@ -1171,8 +1198,7 @@ function dayCategory(dayWorkouts) {
 
 function renderWorkoutsChart(workouts) {
   const periods = periodBuckets();
-  const byDate = {};
-  workouts.forEach(w => (byDate[localDateStr(new Date(w.date))] ??= []).push(w));
+  const byDate = groupByDate(workouts);
 
   const counts = {}; // category -> per-period day counts
   Object.values(byDate).forEach(dayWs => {
