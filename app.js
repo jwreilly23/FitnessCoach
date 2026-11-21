@@ -72,6 +72,26 @@ let activeDay = 1;      // current log tab (1–4)
 let sessionSets = {};   // { exerciseId: [{reps, weight, rpe}] }
 let sessionCardio = []; // [{ type, minutes }]
 let progressCharts = {};
+let logDate = localDateStr(); // 'YYYY-MM-DD' (local) the workout is logged for
+let logDatePicked = false;    // true once the user picks a date other than today
+
+// ── DATE HELPERS ────────────────────────────────────────
+// Local calendar date as 'YYYY-MM-DD' (toISOString would give the UTC date)
+function localDateStr(d = new Date()) {
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+function parseLocalDate(str) {
+  const [y, m, d] = str.split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
+
+// Workouts logged on or before the selected log date, so backlogging an
+// older day pre-fills from what came before it rather than from later sessions
+function workoutsUpToLogDate(workouts) {
+  return workouts.filter(w => localDateStr(new Date(w.date)) <= logDate);
+}
 
 // ── BOOT ────────────────────────────────────────────────
 async function boot() {
@@ -95,6 +115,9 @@ function setupNav() {
       btn.classList.add('active');
       document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
       document.getElementById('view-' + view).classList.add('active');
+      if (view === 'log' && !logDatePicked && logDate !== localDateStr()) {
+        setLogDate(localDateStr()); // app left open past midnight
+      }
       if (view === 'progress') refreshProgress();
       if (view === 'history') renderHistory();
     });
@@ -116,6 +139,7 @@ async function renderHome() {
     `Day ${day.id} of 4 · ${day.exercises.filter(e => e.primary).length} primary exercises`;
 
   document.getElementById('start-workout-btn').onclick = async () => {
+    setLogDate(localDateStr(), false);
     activeDay = next;
     highlightDayTab();
     await initSessionForDay(activeDay);
@@ -192,11 +216,49 @@ function renderLog() {
     ct.innerHTML += `<option value="${t}">${t}</option>`;
   });
 
+  // Date picker: defaults to today, can be moved back to backlog a past day
+  const dateInput = document.getElementById('log-date');
+  dateInput.onchange = () => {
+    const today = localDateStr();
+    let val = dateInput.value || today;
+    if (val > today) val = today; // no logging in the future
+    logDatePicked = val !== today;
+    setLogDate(val);
+  };
+  document.getElementById('log-today-btn').onclick = () => {
+    logDatePicked = false;
+    setLogDate(localDateStr());
+  };
+  updateLogDateUI();
+
   document.getElementById('add-cardio-btn').onclick = addCardio;
   document.getElementById('save-workout-btn').onclick = saveWorkout;
   document.getElementById('add-alternate-btn').onclick = addAlternateExercise;
 
   initSessionForDay(activeDay);
+}
+
+// Change the log date and reload pre-filled baselines for it
+function setLogDate(dateStr, reload = true) {
+  logDate = dateStr;
+  if (dateStr === localDateStr()) logDatePicked = false;
+  updateLogDateUI();
+  if (reload) initSessionForDay(activeDay);
+}
+
+function updateLogDateUI() {
+  const today = localDateStr();
+  const input = document.getElementById('log-date');
+  input.max   = today;
+  input.value = logDate;
+  const isToday = logDate === today;
+  document.getElementById('log-today-btn').classList.toggle('hidden', isToday);
+  const note = document.getElementById('log-date-note');
+  note.classList.toggle('hidden', isToday);
+  if (!isToday) {
+    note.textContent = 'Backlogging: ' + parseLocalDate(logDate).toLocaleDateString('en-US',
+      { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+  }
 }
 
 function highlightDayTab() {
@@ -207,7 +269,7 @@ function highlightDayTab() {
 async function initSessionForDay(dayId) {
   // Pre-fill baseline from last time this day was done
   const day = exercises.days.find(d => d.id === dayId);
-  const workouts = await dbGetAll('workouts');
+  const workouts = workoutsUpToLogDate(await dbGetAll('workouts'));
   const last = workouts
     .filter(w => w.dayId === dayId)
     .sort((a, b) => new Date(b.date) - new Date(a.date))[0];
@@ -347,7 +409,7 @@ function renderSetsFor(exId, card) {
 }
 
 async function loadBaseline(exId) {
-  const workouts = await dbGetAll('workouts');
+  const workouts = workoutsUpToLogDate(await dbGetAll('workouts'));
   const last = workouts
     .filter(w => w.dayId === activeDay && w.sets?.[exId]?.length)
     .sort((a, b) => new Date(b.date) - new Date(a.date))[0];
@@ -400,18 +462,25 @@ async function saveWorkout() {
     if (filled.length) sets[exId] = filled;
   });
 
+  // Today keeps the actual time; a backlogged day is stored at local noon
+  // so it stays on that calendar date regardless of time zone
+  const isToday = logDate === localDateStr();
+  const date = isToday ? new Date() : parseLocalDate(logDate);
+  if (!isToday) date.setHours(12, 0, 0, 0);
+
   const workout = {
     dayId:  activeDay,
-    date:   new Date().toISOString(),
+    date:   date.toISOString(),
     sets,
     cardio: [...sessionCardio],
     notes:  document.getElementById('workout-notes').value.trim()
   };
 
   await dbPut('workouts', workout);
-  showToast('Workout saved!', 'success');
+  showToast(isToday ? 'Workout saved!'
+    : `Saved for ${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`, 'success');
   await renderHome();
-  initSessionForDay(activeDay);
+  setLogDate(localDateStr()); // back to today so the next log isn't misdated
 }
 
 // ── HISTORY ──────────────────────────────────────────────

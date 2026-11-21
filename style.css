@@ -137,6 +137,13 @@ main {
 
 textarea.input-field { resize: vertical; }
 
+/* Log page date picker */
+.log-date-row { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
+.log-date-input { flex: 1; color-scheme: dark; }
+.log-today-btn { width: auto; flex: none; padding: 10px 14px; }
+.log-date-note { margin-top: 6px; font-size: 13px; color: var(--accent); }
+.hidden.log-today-btn, .hidden.log-date-note { display: none; }
+
 .field-label {
   display: block;
   font-size: 12px;
