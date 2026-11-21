@@ -553,21 +553,6 @@ async function refreshProgress() {
   }
 }
 
-function getWeekLabel(date) {
-  const d = new Date(date);
-  const start = getWeekStart(d);
-  return start.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-}
-
-function groupByWeek(workouts, valueFn) {
-  const map = {};
-  workouts.forEach(w => {
-    const label = getWeekLabel(w.date);
-    map[label] = (map[label] || 0) + valueFn(w);
-  });
-  return map;
-}
-
 function chartDefaults() {
   return {
     responsive: true,
@@ -579,37 +564,126 @@ function chartDefaults() {
   };
 }
 
+// Categorical colors (fixed order, validated for colorblind separation on the dark surface).
+// Color follows the entity: Day N and each cardio type always get the same color.
+const SERIES_COLORS = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#0ca30c', '#9085e9', '#e66767'];
+const OTHER_COLOR   = '#6b6b68';
+const CHART_SURFACE = '#1a1a1a';
+const MAX_WEEKS     = 16; // keep bars readable on a phone
+
+// Every week (Sunday start) from the first workout to this week, oldest first,
+// including empty weeks so gaps are visible
+function weekBuckets(workouts) {
+  const thisWeek = getWeekStart(new Date());
+  let start = thisWeek;
+  workouts.forEach(w => {
+    const ws = getWeekStart(new Date(w.date));
+    if (ws < start) start = ws;
+  });
+  const weeks = [];
+  for (let d = new Date(start); d <= thisWeek; d.setDate(d.getDate() + 7)) {
+    weeks.push(localDateStr(d));
+  }
+  return weeks.slice(-MAX_WEEKS);
+}
+
+const weekKey = w => localDateStr(getWeekStart(new Date(w.date)));
+const weekLabel = key =>
+  parseLocalDate(key).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+function stackedBarOptions(yTitle, unit) {
+  const base = chartDefaults();
+  return {
+    ...base,
+    interaction: { mode: 'index', intersect: false },
+    plugins: {
+      legend: {
+        display: true,
+        position: 'bottom',
+        labels: { color: '#bbb', boxWidth: 10, boxHeight: 10, font: { size: 11 } }
+      },
+      tooltip: {
+        filter: item => item.raw > 0,
+        callbacks: {
+          title: items => 'Week of ' + items[0].label,
+          label: item => ` ${item.dataset.label}: ${item.raw}${unit}`,
+          footer: items => 'Total: ' + items.reduce((s, i) => s + i.raw, 0) + unit
+        }
+      }
+    },
+    scales: {
+      x: { ...base.scales.x, stacked: true, grid: { display: false } },
+      y: {
+        ...base.scales.y, stacked: true,
+        ticks: { ...base.scales.y.ticks, precision: 0 },
+        title: { display: true, text: yTitle, color: '#888', font: { size: 11 } }
+      }
+    }
+  };
+}
+
+function stackedDataset(label, data, color) {
+  return {
+    label, data,
+    backgroundColor: color,
+    borderColor: CHART_SURFACE,  // thin gap between stacked segments
+    borderWidth: { top: 2 },
+    borderSkipped: 'start',
+    borderRadius: 4              // Chart.js rounds only the top of each stack
+  };
+}
+
+// Workouts per week, stacked by training day so a missed day stands out
 function renderWorkoutsChart(workouts) {
-  const map = groupByWeek(workouts, () => 1);
-  const labels = Object.keys(map);
-  const data   = labels.map(l => map[l]);
+  const weeks = weekBuckets(workouts);
+  const datasets = exercises.days.map((day, i) => {
+    const data = weeks.map(wk =>
+      workouts.filter(w => w.dayId === day.id && weekKey(w) === wk).length);
+    return stackedDataset(`D${day.id}: ${day.label}`, data, SERIES_COLORS[i] || OTHER_COLOR);
+  });
+
   const ctx = document.getElementById('chart-workouts').getContext('2d');
   if (progressCharts.workouts) progressCharts.workouts.destroy();
   progressCharts.workouts = new Chart(ctx, {
     type: 'bar',
-    data: {
-      labels,
-      datasets: [{ data, backgroundColor: '#e85d04', borderRadius: 6 }]
-    },
-    options: chartDefaults()
+    data: { labels: weeks.map(weekLabel), datasets },
+    options: stackedBarOptions('Workouts', '')
   });
 }
 
+// Cardio minutes per week, stacked by cardio type. Types past the 8th color
+// fold into "Other" rather than reusing a color.
+function cardioGroup(type) {
+  const idx = exercises.cardioTypes.indexOf(type);
+  return idx >= 0 && idx < SERIES_COLORS.length && type !== 'Other' ? type : 'Other';
+}
+
 function renderCardioChart(workouts) {
-  const map = groupByWeek(workouts, w =>
-    (w.cardio || []).reduce((s, c) => s + c.minutes, 0)
-  );
-  const labels = Object.keys(map);
-  const data   = labels.map(l => map[l]);
+  const weeks = weekBuckets(workouts);
+  const totals = {}; // group -> { week -> minutes }
+  workouts.forEach(w => (w.cardio || []).forEach(c => {
+    const g = cardioGroup(c.type);
+    totals[g] ??= {};
+    totals[g][weekKey(w)] = (totals[g][weekKey(w)] || 0) + (Number(c.minutes) || 0);
+  }));
+
+  // Fixed order from cardioTypes, only types actually logged; Other last
+  const groups = exercises.cardioTypes.map(cardioGroup)
+    .filter((g, i, arr) => arr.indexOf(g) === i && totals[g])
+    .sort((a, b) => (a === 'Other') - (b === 'Other'));
+
+  const datasets = groups.map(g => stackedDataset(
+    g,
+    weeks.map(wk => totals[g][wk] || 0),
+    g === 'Other' ? OTHER_COLOR : SERIES_COLORS[exercises.cardioTypes.indexOf(g)]
+  ));
+
   const ctx = document.getElementById('chart-cardio').getContext('2d');
   if (progressCharts.cardio) progressCharts.cardio.destroy();
   progressCharts.cardio = new Chart(ctx, {
     type: 'bar',
-    data: {
-      labels,
-      datasets: [{ data, backgroundColor: '#ff8c42', borderRadius: 6 }]
-    },
-    options: chartDefaults()
+    data: { labels: weeks.map(weekLabel), datasets },
+    options: stackedBarOptions('Minutes', ' min')
   });
 }
 
