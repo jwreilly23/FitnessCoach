@@ -460,3 +460,14 @@ canvas { max-height: 220px; }
 ::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+/* Remove-exercise button on exercise cards */
+.exercise-remove {
+  background: none; border: none; color: var(--muted, #888);
+  font-size: 20px; line-height: 1; padding: 4px 6px; margin-left: 4px; cursor: pointer;
+}
+.exercise-remove:hover { color: var(--danger); }
+
+/* Edit-mode note and secondary log button */
+.log-edit-note { font-size: 13px; text-align: center; margin-top: 12px; }
+.hidden.log-edit-note, .hidden#log-new-btn { display: none; }

@@ -73,7 +73,8 @@ let sessionSets = {};   // { exerciseId: [{reps, weight, rpe}] }
 let sessionCardio = []; // [{ type, minutes }]
 let progressCharts = {};
 let logDate = localDateStr(); // 'YYYY-MM-DD' (local) the workout is logged for
-let logDatePicked = false;    // true once the user picks a date other than today
+let logDatePicked = false;
+let editingWorkout = null;    // saved workout being edited, or null when logging a new one    // true once the user picks a date other than today
 
 // ── DATE HELPERS ────────────────────────────────────────
 // Local calendar date as 'YYYY-MM-DD' (toISOString would give the UTC date)
@@ -237,6 +238,7 @@ function renderLog() {
 
   document.getElementById('add-cardio-btn').onclick = addCardio;
   document.getElementById('save-workout-btn').onclick = saveWorkout;
+  document.getElementById('log-new-btn').onclick = () => initSessionForDay(activeDay, { fresh: true });
   document.getElementById('add-alternate-btn').onclick = addAlternateExercise;
 
   initSessionForDay(activeDay);
@@ -270,37 +272,64 @@ function highlightDayTab() {
     t.classList.toggle('active', Number(t.dataset.day) === activeDay));
 }
 
-async function initSessionForDay(dayId) {
-  // Pre-fill baseline from last time this day was done
+const sameDate = w => localDateStr(new Date(w.date)) === logDate;
+
+// Load the form for a day. If this day was already logged on the selected date,
+// open that entry for editing; otherwise (or with fresh) start a new log
+// pre-filled from the last time this day was done.
+async function initSessionForDay(dayId, { fresh = false } = {}) {
   const day = exercises.days.find(d => d.id === dayId);
-  const workouts = workoutsUpToLogDate(await dbGetAll('workouts'));
-  const last = workouts
-    .filter(w => w.dayId === dayId)
-    .sort((a, b) => new Date(b.date) - new Date(a.date))[0];
+  const all = await dbGetAll('workouts');
+  const byNewest = (a, b) => new Date(b.date) - new Date(a.date);
+
+  editingWorkout = fresh ? null
+    : all.filter(w => w.dayId === dayId && sameDate(w)).sort(byNewest)[0] || null;
 
   sessionSets = {};
-  day.exercises.filter(e => e.primary).forEach(ex => {
-    const prevSets = last?.sets?.[ex.id] || [];
-    sessionSets[ex.id] = prevSets.length
-      ? prevSets.map(s => ({ ...s }))
-      : [{ reps: '', weight: '', rpe: '' }];
-  });
+  if (editingWorkout) {
+    Object.entries(editingWorkout.sets || {}).forEach(([exId, rows]) => {
+      sessionSets[exId] = rows.map(r => ({ ...r }));
+    });
+    sessionCardio = (editingWorkout.cardio || []).map(c => ({ ...c }));
+    document.getElementById('workout-notes').value = editingWorkout.notes || '';
+  } else {
+    const last = workoutsUpToLogDate(all).filter(w => w.dayId === dayId).sort(byNewest)[0];
+    day.exercises.filter(e => e.primary).forEach(ex => {
+      const prevSets = last?.sets?.[ex.id] || [];
+      sessionSets[ex.id] = prevSets.length
+        ? prevSets.map(s => ({ ...s }))
+        : [{ reps: '', weight: '', rpe: '' }];
+    });
+    sessionCardio = [];
+    document.getElementById('workout-notes').value = '';
+  }
 
-  sessionCardio = [];
   renderCardioList();
-  document.getElementById('workout-notes').value = '';
+  updateSaveButtons();
   buildAlternateSelect(dayId);
   renderExerciseList();
 }
 
+function updateSaveButtons() {
+  const editing = !!editingWorkout;
+  document.getElementById('save-workout-btn').textContent = editing ? 'Update Workout' : 'Save Workout';
+  document.getElementById('log-new-btn').classList.toggle('hidden', !editing);
+  const note = document.getElementById('log-edit-note');
+  note.classList.toggle('hidden', !editing);
+  if (editing) {
+    const when = new Date(editingWorkout.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    note.textContent = `Editing the workout already logged for ${when}`;
+  }
+}
+
+// Any exercise for this day that isn't on the form yet (primaries first)
 function buildAlternateSelect(dayId) {
   const day = exercises.days.find(d => d.id === dayId);
-  const alts = day.exercises.filter(e => !e.primary);
   const sel = document.getElementById('alternate-select');
   sel.innerHTML = '<option value="">— select —</option>';
-  alts.forEach(ex => {
+  [...day.exercises].sort((a, b) => b.primary - a.primary).forEach(ex => {
     if (!sessionSets[ex.id]) {
-      sel.innerHTML += `<option value="${ex.id}">${ex.name}</option>`;
+      sel.innerHTML += `<option value="${ex.id}">${ex.name}${ex.primary ? '' : ' (alt)'}</option>`;
     }
   });
 }
@@ -342,6 +371,7 @@ function buildExerciseCard(ex) {
         <div class="exercise-baseline" id="baseline-${ex.id}"></div>
       </div>
       <span class="exercise-tag${ex.primary ? '' : ' alt'}">${ex.primary ? 'PRIMARY' : 'ALT'}</span>
+      <button class="exercise-remove" title="Remove exercise" aria-label="Remove ${ex.name}">×</button>
     </div>
     <div class="exercise-body">
       <div class="sets-header">
@@ -364,6 +394,13 @@ function buildExerciseCard(ex) {
     const lastSet = sessionSets[ex.id].slice(-1)[0] || {};
     sessionSets[ex.id].push({ reps: lastSet.reps || '', weight: lastSet.weight || '', rpe: '' });
     renderSetsFor(ex.id, card);
+  };
+
+  // Remove exercise from this workout (can be re-added from the Add Exercise list)
+  card.querySelector('.exercise-remove').onclick = () => {
+    delete sessionSets[ex.id];
+    buildAlternateSelect(activeDay);
+    renderExerciseList();
   };
 
   // Form modal
@@ -413,7 +450,8 @@ function renderSetsFor(exId, card) {
 }
 
 async function loadBaseline(exId) {
-  const workouts = workoutsUpToLogDate(await dbGetAll('workouts'));
+  const workouts = workoutsUpToLogDate(await dbGetAll('workouts'))
+    .filter(w => w.id !== editingWorkout?.id); // don't compare an entry to itself
   const last = workouts
     .filter(w => w.dayId === activeDay && w.sets?.[exId]?.length)
     .sort((a, b) => new Date(b.date) - new Date(a.date))[0];
@@ -464,6 +502,13 @@ async function saveWorkout() {
     s.some(r => r.reps || r.weight)
   );
   if (!hasSets && !sessionCardio.length) {
+    if (editingWorkout && confirm('Everything was removed. Delete this logged workout?')) {
+      await dbDelete('workouts', editingWorkout.id);
+      showToast('Workout deleted', 'success');
+      await renderHome();
+      setLogDate(localDateStr());
+      return;
+    }
     showToast('Nothing to save', 'error');
     return;
   }
@@ -478,10 +523,12 @@ async function saveWorkout() {
   // Today keeps the actual time; a backlogged day is stored at local noon
   // so it stays on that calendar date regardless of time zone
   const isToday = logDate === localDateStr();
-  const date = isToday ? new Date() : parseLocalDate(logDate);
+  let date = isToday ? new Date() : parseLocalDate(logDate);
   if (!isToday) date.setHours(12, 0, 0, 0);
+  if (editingWorkout) date = new Date(editingWorkout.date); // keep original timestamp
 
   const workout = {
+    ...(editingWorkout ? { id: editingWorkout.id } : {}),
     dayId:  activeDay,
     date:   date.toISOString(),
     sets,
@@ -490,7 +537,7 @@ async function saveWorkout() {
   };
 
   await dbPut('workouts', workout);
-  showToast(isToday ? 'Workout saved!'
+  showToast(editingWorkout ? 'Workout updated!' : isToday ? 'Workout saved!'
     : `Saved for ${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`, 'success');
   await renderHome();
   setLogDate(localDateStr()); // back to today so the next log isn't misdated
@@ -671,32 +718,44 @@ function cardioGroup(type) {
   return idx >= 0 && idx < SERIES_COLORS.length && type !== 'Other' ? type : 'Other';
 }
 
+// Each cardio entry is its own segment (with a thin gap), so 10+10+40 min
+// reads differently from 20+20+20 even when it's all one type
 function renderCardioChart(workouts) {
   const weeks = weekBuckets(workouts);
-  const totals = {}; // group -> { week -> minutes }
-  workouts.forEach(w => (w.cardio || []).forEach(c => {
-    const g = cardioGroup(c.type);
-    totals[g] ??= {};
-    totals[g][weekKey(w)] = (totals[g][weekKey(w)] || 0) + (Number(c.minutes) || 0);
-  }));
+  const entries = {}; // group -> { week -> [minutes, ...] } in logged order
+  [...workouts].sort((a, b) => new Date(a.date) - new Date(b.date)).forEach(w =>
+    (w.cardio || []).forEach(c => {
+      const g = cardioGroup(c.type), wk = weekKey(w);
+      entries[g] ??= {};
+      (entries[g][wk] ??= []).push(Number(c.minutes) || 0);
+    }));
 
   // Fixed order from cardioTypes, only types actually logged; Other last
   const groups = exercises.cardioTypes.map(cardioGroup)
-    .filter((g, i, arr) => arr.indexOf(g) === i && totals[g])
+    .filter((g, i, arr) => arr.indexOf(g) === i && entries[g])
     .sort((a, b) => (a === 'Other') - (b === 'Other'));
 
-  const datasets = groups.map(g => stackedDataset(
-    g,
-    weeks.map(wk => totals[g][wk] || 0),
-    g === 'Other' ? OTHER_COLOR : SERIES_COLORS[exercises.cardioTypes.indexOf(g)]
-  ));
+  const datasets = [];
+  groups.forEach(g => {
+    const color = g === 'Other' ? OTHER_COLOR : SERIES_COLORS[exercises.cardioTypes.indexOf(g)];
+    const slots = Math.max(...weeks.map(wk => entries[g][wk]?.length || 0), 1);
+    for (let k = 0; k < slots; k++) {
+      const ds = stackedDataset(g, weeks.map(wk => entries[g][wk]?.[k] || 0), color);
+      ds.firstOfType = k === 0;
+      datasets.push(ds);
+    }
+  });
+
+  const options = stackedBarOptions('Minutes', ' min');
+  options.plugins.legend.labels.filter = item => datasets[item.datasetIndex].firstOfType;
+  options.plugins.legend.onClick = () => {}; // types span several datasets; keep legend static
 
   const ctx = document.getElementById('chart-cardio').getContext('2d');
   if (progressCharts.cardio) progressCharts.cardio.destroy();
   progressCharts.cardio = new Chart(ctx, {
     type: 'bar',
     data: { labels: weeks.map(weekLabel), datasets },
-    options: stackedBarOptions('Minutes', ' min')
+    options
   });
 }
 
