@@ -153,6 +153,11 @@
       <div class="chart-box"><canvas id="chart-azm"></canvas></div>
     </div>
     <div class="card">
+      <div class="card-label" id="label-steps">AVERAGE DAILY STEPS BY WEEK</div>
+      <p id="steps-empty" class="muted azm-empty">No step data yet. Run “Sync Fitbit history” in Settings to load your daily steps.</p>
+      <div class="chart-box"><canvas id="chart-steps"></canvas></div>
+    </div>
+    <div class="card">
       <div class="card-label">EXERCISE WEIGHT PROGRESSION</div>
       <select id="progress-exercise-select" class="input-field mb-8">
         <option value="">Select exercise…</option>
@@ -181,7 +186,7 @@
     </div>
     <div class="card">
       <div class="card-label">FITBIT</div>
-      <p class="muted">Import all your Fitbit workouts. Safe to run again: anything already imported is skipped.</p>
+      <p class="muted">Import all your Fitbit workouts and daily steps. Safe to run again: anything already imported is skipped.</p>
       <button class="btn btn-secondary mt-8" id="fitbit-sync-btn">⌚ Sync Fitbit history</button>
       <p id="fitbit-sync-status" class="muted mt-4"></p>
     </div>

@@ -631,6 +631,8 @@ function checkFitbit() {
       if (forDate !== logDate) return; // date changed while loading
       fitbitSessions = sessions;
       renderFitbitList();
+      const twoWeeksAgo = new Date(); twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
+      if (fitbitToken) fetchFitbitSteps(localDateStr(twoWeeksAgo), fitbitToken.value).catch(() => {});
     })
     .catch(err => {
       list.innerHTML = '';
@@ -754,6 +756,49 @@ async function fetchFitbitAll(token, onPage) {
   return all;
 }
 
+// Daily step totals from Fitbit (dailyRollUp, max 90 days per request), merged into settings
+async function fetchFitbitSteps(fromDateStr, token, onChunk = () => {}) {
+  const civil = (dateStr, end) => {
+    const [year, month, day] = dateStr.split('-').map(Number);
+    return { date: { year, month, day },
+             time: end ? { hours: 23, minutes: 59, seconds: 59, nanos: 0 }
+                       : { hours: 0, minutes: 0, seconds: 0, nanos: 0 } };
+  };
+  const saved = await getSetting('stepsByDate', {}) || {};
+  const today = parseLocalDate(localDateStr());
+  let start = parseLocalDate(fromDateStr);
+  while (start <= today) {
+    const end = new Date(start);
+    end.setDate(end.getDate() + 89);
+    if (end > today) end.setTime(today.getTime());
+    const resp = await fetch(`${FITBIT.api}/steps/dataPoints:dailyRollUp`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        range: { start: civil(localDateStr(start)), end: civil(localDateStr(end), true) },
+        windowSizeDays: 1,
+        pageSize: 90
+      })
+    });
+    if (!resp.ok) {
+      let detail = '';
+      try { detail = (await resp.json()).error?.message || ''; } catch {}
+      throw new Error(`Fitbit steps request failed (${resp.status}). ${detail}`);
+    }
+    const data = await resp.json();
+    (data.rollupDataPoints || []).forEach(p => {
+      const d = p.civilStartTime?.date;
+      if (!d || !p.steps) return;
+      saved[`${d.year}-${pad2(d.month)}-${pad2(d.day)}`] = Number(p.steps.countSum) || 0;
+    });
+    onChunk(localDateStr(end));
+    start = new Date(end);
+    start.setDate(start.getDate() + 1);
+  }
+  await setSetting('stepsByDate', saved);
+  stepsByDate = saved;
+}
+
 function syncFitbitHistory() {
   const status = document.getElementById('fitbit-sync-status');
   const btn = document.getElementById('fitbit-sync-btn');
@@ -768,6 +813,16 @@ function syncFitbitHistory() {
         n => { status.textContent = `Downloading Fitbit workouts… ${n} found`; });
     })
     .then(importFitbitSessions)
+    .then(async summary => {
+      const workouts = await dbGetAll('workouts');
+      const earliest = workouts.length
+        ? new Date(Math.min(...workouts.map(w => new Date(w.date).getTime())))
+        : new Date(Date.now() - 730 * 86400000);
+      status.textContent = 'Downloading daily steps…';
+      await fetchFitbitSteps(localDateStr(earliest), fitbitToken.value,
+        upTo => { status.textContent = `Downloading daily steps… through ${upTo}`; });
+      return summary + ' Daily steps updated.';
+    })
     .then(summary => {
       status.textContent = summary;
       renderHome();
@@ -1015,6 +1070,8 @@ async function renderProgress() {
   renderWorkoutsChart(workouts);
   renderCardioChart(workouts);
   renderAzmChart(workouts);
+  stepsByDate = await getSetting('stepsByDate', {}) || {};
+  renderStepsChart();
 }
 
 async function refreshProgress() {
@@ -1132,6 +1189,7 @@ function updateProgressLabels() {
   document.getElementById('label-workouts').textContent = `WORKOUT DAYS PER ${per}`;
   document.getElementById('label-cardio').textContent   = `CARDIO MINUTES PER ${per}`;
   document.getElementById('label-azm').textContent      = `ACTIVE ZONE MINUTES PER ${per}`;
+  document.getElementById('label-steps').textContent    = `AVERAGE DAILY STEPS BY ${per}`;
 }
 
 function stackedBarOptions(yTitle, unit) {
@@ -1361,23 +1419,62 @@ function renderCardioChart(workouts) {
 }
 
 // Active Zone Minutes from Fitbit, split into cardio vs lifting sessions
+// Gym cardio machines; every other cardio type counts as "Other cardio" in the AZM chart
+const GYM_CARDIO = new Set(['Treadmill', 'Stairmaster', 'Elliptical', 'Rowing Machine', 'Stationary Bike']);
+
 function renderAzmChart(workouts) {
   const periods = periodBuckets();
-  const cardio = periods.map(() => 0), lifting = periods.map(() => 0);
+  const zeros = () => periods.map(() => 0);
+  const gym = zeros(), other = zeros(), lifting = zeros();
   let any = false;
   workouts.forEach(w => {
     const i = periods.indexOf(periodKey(w));
     if (i < 0) return;
-    (w.cardio || []).forEach(c => { if (c.azm) { cardio[i] += c.azm; any = true; } });
+    (w.cardio || []).forEach(c => {
+      if (!c.azm) return;
+      (GYM_CARDIO.has(c.type) ? gym : other)[i] += c.azm;
+      any = true;
+    });
     if (w.fitbit?.isLift && w.fitbit.azm) { lifting[i] += w.fitbit.azm; any = true; }
   });
 
   document.getElementById('azm-empty').classList.toggle('hidden', any);
   const datasets = [
-    stackedDataset('Cardio', cardio, SERIES_COLORS[0]),
-    stackedDataset('Lifting', lifting, SERIES_COLORS[1])
+    stackedDataset('Gym cardio', gym, SERIES_COLORS[0]),
+    stackedDataset('Lifting', lifting, SERIES_COLORS[1]),
+    stackedDataset('Other cardio', other, OTHER_COLOR)
   ];
   drawChart('azm', 'chart-azm', periods.map(periodLabel), datasets, stackedBarOptions('AZM', ' AZM'));
+}
+
+// Average daily steps per week/month (today is left out: it's not over yet)
+let stepsByDate = {}; // 'YYYY-MM-DD' -> steps, saved in settings
+
+function renderStepsChart() {
+  const periods = periodBuckets();
+  const sums = periods.map(() => 0), days = periods.map(() => 0);
+  const today = localDateStr();
+  const unitWeek = rangeUnit() === 'week';
+  Object.entries(stepsByDate).forEach(([date, steps]) => {
+    if (date === today || !steps) return;
+    const d = parseLocalDate(date);
+    const key = unitWeek ? localDateStr(getWeekStart(d)) : monthKey(d);
+    const i = periods.indexOf(key);
+    if (i < 0) return;
+    sums[i] += steps;
+    days[i]++;
+  });
+  const avg = sums.map((s, i) => days[i] ? Math.round(s / days[i]) : 0);
+  document.getElementById('steps-empty').classList.toggle('hidden', avg.some(Boolean));
+
+  const options = stackedBarOptions('Steps / day', '');
+  options.plugins.legend.display = false;
+  options.plugins.tooltip.callbacks.label = item =>
+    ` Avg ${item.raw.toLocaleString('en-US')} steps/day` + (days[item.dataIndex] ? ` (${days[item.dataIndex]} days)` : '');
+  options.plugins.tooltip.callbacks.footer = () => '';
+  options.scales.y.ticks.callback = v => v >= 1000 ? (v / 1000) + 'k' : v;
+  drawChart('steps', 'chart-steps', periods.map(periodLabel),
+    [stackedDataset('Avg daily steps', avg, SERIES_COLORS[2])], options);
 }
 
 function renderWeightChart(workouts, exId) {
