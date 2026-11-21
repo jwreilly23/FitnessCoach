@@ -131,14 +131,25 @@
   <section id="view-progress" class="view">
     <header class="page-header">
       <h2>Progress</h2>
+      <div class="range-toggle" id="range-toggle" role="group" aria-label="Time range">
+        <button data-range="1m" class="active">1M</button>
+        <button data-range="3m">3M</button>
+        <button data-range="6m">6M</button>
+        <button data-range="1y">1Y</button>
+      </div>
     </header>
     <div class="card">
-      <div class="card-label">WORKOUTS PER WEEK</div>
+      <div class="card-label" id="label-workouts">WORKOUTS PER WEEK</div>
       <canvas id="chart-workouts"></canvas>
     </div>
     <div class="card">
-      <div class="card-label">CARDIO MINUTES PER WEEK</div>
+      <div class="card-label" id="label-cardio">CARDIO MINUTES PER WEEK</div>
       <canvas id="chart-cardio"></canvas>
+    </div>
+    <div class="card">
+      <div class="card-label" id="label-azm">ACTIVE ZONE MINUTES PER WEEK</div>
+      <p id="azm-empty" class="muted azm-empty">No Fitbit data in this range yet. Add sessions with “Check Fitbit” on the Log page, or sync your history in Settings.</p>
+      <canvas id="chart-azm"></canvas>
     </div>
     <div class="card">
       <div class="card-label">EXERCISE WEIGHT PROGRESSION</div>
@@ -166,6 +177,12 @@
       <input id="settings-emailjs-template" type="text" class="input-field" placeholder="template_xxxxxxx" />
       <button class="btn btn-secondary mt-8" id="send-recap-btn">Send Recap Now</button>
       <p id="recap-status" class="muted mt-4"></p>
+    </div>
+    <div class="card">
+      <div class="card-label">FITBIT</div>
+      <p class="muted">Import the last 12 months of Fitbit workouts. Safe to run again: anything already imported is skipped.</p>
+      <button class="btn btn-secondary mt-8" id="fitbit-sync-btn">⌚ Sync Fitbit history</button>
+      <p id="fitbit-sync-status" class="muted mt-4"></p>
     </div>
     <div class="card">
       <div class="card-label">DATA</div>

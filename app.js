@@ -105,6 +105,7 @@ async function boot() {
   renderProgress();
   setupNav();
   setupModal();
+  setupRangeToggle();
 }
 
 // ── NAV ─────────────────────────────────────────────────
@@ -152,7 +153,7 @@ async function renderHome() {
   const thisWeek  = workouts.filter(w => new Date(w.date) >= weekStart);
   const cardioMin = thisWeek.reduce((s, w) => s + (w.cardio || []).reduce((a, c) => a + c.minutes, 0), 0);
   document.getElementById('week-stats').innerHTML = `
-    <div class="stat-box"><div class="stat-val">${thisWeek.filter(hasLifting).length}</div><div class="stat-lbl">Workouts</div></div>
+    <div class="stat-box"><div class="stat-val">${thisWeek.filter(isLiftWorkout).length}</div><div class="stat-lbl">Workouts</div></div>
     <div class="stat-box"><div class="stat-val">${cardioMin}</div><div class="stat-lbl">Cardio min</div></div>
     <div class="stat-box"><div class="stat-val">${Math.round(cardioMin/60*10)/10}</div><div class="stat-lbl">Cardio hrs</div></div>
   `;
@@ -165,9 +166,17 @@ async function renderHome() {
 
 // A saved entry with lifting sets (cardio-only entries don't count as a training day)
 const hasLifting = w => Object.keys(w.sets || {}).length > 0;
+// Any lifting session: logged sets, or a lifting session imported from Fitbit
+const isLiftWorkout = w => hasLifting(w) || !!w.fitbit?.isLift;
+
+function workoutTitle(w) {
+  const day = exercises.days.find(d => d.id === w.dayId);
+  if (isLiftWorkout(w)) return day ? `Day ${day.id}: ${day.label}` : 'Lifting (Fitbit)';
+  return 'Cardio';
+}
 
 async function getNextDay(workouts) {
-  workouts = workouts.filter(hasLifting);
+  workouts = workouts.filter(w => isLiftWorkout(w) && w.dayId);
   // Find the last completed day; suggest next in rotation
   if (!workouts.length) return 1;
   const last = workouts.sort((a, b) => new Date(b.date) - new Date(a.date))[0];
@@ -609,7 +618,10 @@ function fitbitSessionInfo(dp) {
     minutes,
     time: start.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }),
     calories: m.caloriesKcal ? Math.round(m.caloriesKcal) : null,
-    avgHr: m.averageHeartRateBeatsPerMinute ? Number(m.averageHeartRateBeatsPerMinute) : null
+    avgHr: m.averageHeartRateBeatsPerMinute ? Number(m.averageHeartRateBeatsPerMinute) : null,
+    azm: m.activeZoneMinutes ? Number(m.activeZoneMinutes) : null,
+    exerciseType: ex.exerciseType,
+    startTime: ex.interval.startTime
   };
 }
 
@@ -627,7 +639,8 @@ function renderFitbitList() {
     row.className = 'fitbit-item';
     const details = [s.time, `${s.minutes} min`,
       s.calories != null ? `${s.calories} cal` : '',
-      s.avgHr != null ? `${s.avgHr} bpm avg` : ''].filter(Boolean).join(' · ');
+      s.avgHr != null ? `${s.avgHr} bpm avg` : '',
+      s.azm != null ? `${s.azm} AZM` : ''].filter(Boolean).join(' · ');
     row.innerHTML = `
       <div class="fitbit-info">
         <div class="fitbit-name"></div>
@@ -642,7 +655,8 @@ function renderFitbitList() {
       btn.textContent = added ? 'Added ✓' : 'Add';
       btn.disabled = added;
       btn.onclick = () => {
-        sessionCardio.push({ type: s.cardioType, minutes: s.minutes, fitbitId: s.id });
+        sessionCardio.push({ type: s.cardioType, minutes: s.minutes, fitbitId: s.id,
+                             azm: s.azm, avgHr: s.avgHr, calories: s.calories });
         renderCardioList();
         renderFitbitList();
       };
@@ -650,6 +664,143 @@ function renderFitbitList() {
     }
     list.appendChild(row);
   });
+}
+
+// ── FITBIT HISTORY SYNC ──────────────────────────────────
+// Pulls the last 12 months of Fitbit exercise sessions. Re-runnable: sessions
+// already imported are skipped. Cardio becomes cardio-only entries; lifting
+// becomes an "Unassigned" lifting entry, or attaches its Fitbit stats (AZM,
+// heart rate) to a workout you already logged that day.
+
+// Unmapped Fitbit types that still count as cardio (imported as "Other").
+// Everything else (walks, hikes, chores…) is skipped to keep history clean.
+const FITBIT_OTHER_CARDIO = new Set(['HIIT', 'CARDIO_WORKOUT', 'AEROBIC_WORKOUT', 'INTERVAL_WORKOUT',
+  'BOOTCAMP', 'KICKBOXING', 'BOXING', 'CROSS_TRAINING', 'TABATA_WORKOUT', 'STEP_TRAINING',
+  'CARDIO_SCULPT', 'ZUMBA', 'DANCING', 'WATER_AEROBICS']);
+
+const fitbitMeta = s => ({ id: s.id, type: s.exerciseType, name: s.name, isLift: s.isLift,
+  minutes: s.minutes, azm: s.azm, avgHr: s.avgHr, calories: s.calories });
+
+async function fetchFitbitRange(sinceDateStr, token, onPage) {
+  const filter = `exercise.interval.civil_start_time >= "${sinceDateStr}"`;
+  const all = [];
+  let pageToken = '';
+  for (let page = 0; page < 60; page++) { // 25 per page; 60 pages = 1500 sessions max
+    const url = `${FITBIT.api}/exercise/dataPoints?pageSize=25&filter=${encodeURIComponent(filter)}` +
+                (pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : '');
+    const resp = await fetch(url, { headers: { Authorization: 'Bearer ' + token } });
+    if (resp.status === 401) {
+      fitbitToken = null;
+      try { sessionStorage.removeItem('fitbitToken'); } catch {}
+      throw new Error('Google sign-in expired. Tap Sync again to sign back in.');
+    }
+    if (!resp.ok) {
+      let detail = '';
+      try { detail = (await resp.json()).error?.message || ''; } catch {}
+      throw new Error(`Fitbit request failed (${resp.status}). ${detail}`);
+    }
+    const data = await resp.json();
+    all.push(...(data.dataPoints || []).filter(dp => dp.exercise));
+    onPage(all.length);
+    pageToken = data.nextPageToken;
+    if (!pageToken) break;
+  }
+  return all;
+}
+
+function syncFitbitHistory() {
+  const status = document.getElementById('fitbit-sync-status');
+  const btn = document.getElementById('fitbit-sync-btn');
+  const since = new Date();
+  since.setFullYear(since.getFullYear() - 1);
+  status.classList.remove('fitbit-error');
+  status.textContent = 'Signing in…';
+  btn.disabled = true;
+
+  getFitbitToken() // called straight from the tap so the sign-in popup isn't blocked
+    .then(token => {
+      status.textContent = 'Downloading Fitbit workouts…';
+      return fetchFitbitRange(localDateStr(since), token,
+        n => { status.textContent = `Downloading Fitbit workouts… ${n} found`; });
+    })
+    .then(importFitbitSessions)
+    .then(summary => {
+      status.textContent = summary;
+      renderHome();
+      renderHistory();
+      refreshProgress();
+    })
+    .catch(err => {
+      status.classList.add('fitbit-error');
+      status.textContent = err.message;
+    })
+    .finally(() => { btn.disabled = false; });
+}
+
+async function importFitbitSessions(dataPoints) {
+  const workouts = await dbGetAll('workouts');
+  const known = new Set();
+  workouts.forEach(w => {
+    if (w.fitbit?.id) known.add(w.fitbit.id);
+    (w.cardio || []).forEach(c => c.fitbitId && known.add(c.fitbitId));
+  });
+
+  const n = { cardio: 0, cardioMatched: 0, lifts: 0, liftsMatched: 0, already: 0 };
+  const skipped = {};
+  const sameDay = (w, dateStr) => localDateStr(new Date(w.date)) === dateStr;
+
+  for (const dp of dataPoints) {
+    const s = fitbitSessionInfo(dp);
+    if (known.has(s.id)) { n.already++; continue; }
+    const dateStr = localDateStr(new Date(s.startTime));
+
+    if (s.isLift) {
+      // Attach to a lifting workout you logged that day, if one has no Fitbit stats yet
+      const logged = workouts.find(w => hasLifting(w) && !w.fitbit && sameDay(w, dateStr));
+      if (logged) {
+        logged.fitbit = fitbitMeta(s);
+        await dbPut('workouts', logged);
+        n.liftsMatched++;
+      } else {
+        const w = { dayId: null, date: s.startTime, sets: {}, cardio: [], notes: '', fitbit: fitbitMeta(s) };
+        w.id = await dbPut('workouts', w);
+        workouts.push(w);
+        n.lifts++;
+      }
+    } else if (FITBIT_CARDIO_MAP[s.exerciseType] || FITBIT_OTHER_CARDIO.has(s.exerciseType)) {
+      const entry = { type: s.cardioType, minutes: s.minutes, fitbitId: s.id,
+                      azm: s.azm, avgHr: s.avgHr, calories: s.calories };
+      // A cardio entry you typed in by hand that day with the same type is the same session
+      const logged = workouts.find(w => sameDay(w, dateStr) &&
+        (w.cardio || []).some(c => !c.fitbitId && c.type === s.cardioType));
+      if (logged) {
+        const c = logged.cardio.find(c => !c.fitbitId && c.type === s.cardioType);
+        Object.assign(c, { fitbitId: s.id, azm: s.azm, avgHr: s.avgHr, calories: s.calories });
+        await dbPut('workouts', logged);
+        n.cardioMatched++;
+      } else {
+        const w = { dayId: null, date: s.startTime, sets: {}, cardio: [entry], notes: '' };
+        w.id = await dbPut('workouts', w);
+        workouts.push(w);
+        n.cardio++;
+      }
+    } else {
+      skipped[s.name] = (skipped[s.name] || 0) + 1;
+      continue;
+    }
+    known.add(s.id);
+  }
+
+  const parts = [];
+  parts.push(`Imported ${n.cardio} cardio and ${n.lifts} lifting session${n.lifts === 1 ? '' : 's'}.`);
+  if (n.cardioMatched || n.liftsMatched) {
+    parts.push(`Added Fitbit stats to ${n.cardioMatched + n.liftsMatched} entr${n.cardioMatched + n.liftsMatched === 1 ? 'y' : 'ies'} you'd already logged.`);
+  }
+  if (n.already) parts.push(`${n.already} already imported.`);
+  const skippedList = Object.entries(skipped).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${v} ${k}`);
+  if (skippedList.length) parts.push(`Skipped (not lifting/cardio): ${skippedList.join(', ')}.`);
+  if (n.lifts) parts.push('Assign lifting sessions to a day from the History tab.');
+  return parts.join(' ');
 }
 
 // ── SAVE WORKOUT ─────────────────────────────────────────
@@ -694,6 +845,7 @@ async function saveWorkout() {
 
   const workout = {
     ...(editingWorkout ? { id: editingWorkout.id } : {}),
+    ...(editingWorkout?.fitbit ? { fitbit: editingWorkout.fitbit } : {}),
     dayId:  activeDay,
     date:   date.toISOString(),
     sets,
@@ -737,20 +889,37 @@ async function renderHistory() {
       </button>
       <div class="history-date">${new Date(w.date).toLocaleDateString('en-US',
         { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' })}</div>
-      <div class="history-title">${hasLifting(w) ? `Day ${w.dayId}: ${day?.label || '?'}` : 'Cardio'}</div>
+      <div class="history-title">${workoutTitle(w)}</div>
       <div class="history-meta">
-        ${exNames.length} exercise${exNames.length === 1 ? '' : 's'}
-        ${cardioMin ? ` · ${cardioMin} min cardio` : ''}
-        ${w.notes ? ` · "${w.notes}"` : ''}
+        ${[exNames.length ? `${exNames.length} exercise${exNames.length === 1 ? '' : 's'}` : '',
+           cardioMin ? `${cardioMin} min cardio` : '',
+           w.notes ? `"${w.notes}"` : ''].filter(Boolean).join(' · ')}
       </div>
+      ${w.fitbit ? `<div class="history-fitbit">⌚ ${[w.fitbit.name, `${w.fitbit.minutes} min`,
+          w.fitbit.azm ? `${w.fitbit.azm} AZM` : '', w.fitbit.avgHr ? `${w.fitbit.avgHr} bpm avg` : '',
+          w.fitbit.calories ? `${w.fitbit.calories} cal` : ''].filter(Boolean).join(' · ')}</div>` : ''}
       <ul class="history-exercises">
         ${exNames.map(n => `<li>${n}</li>`).join('')}
-        ${(w.cardio || []).map(c => `<li>${c.type} — ${c.minutes} min</li>`).join('')}
+        ${(w.cardio || []).map(c => `<li>${c.type} — ${c.minutes} min${c.azm ? ` · ${c.azm} AZM` : ''}${c.fitbitId ? ' ⌚' : ''}</li>`).join('')}
       </ul>
+      ${w.fitbit?.isLift && !hasLifting(w) ? `
+        <select class="input-field history-assign">
+          <option value="">${w.dayId ? 'Change day…' : 'Assign to a training day…'}</option>
+          ${exercises.days.map(d => `<option value="${d.id}">D${d.id}: ${d.label}</option>`).join('')}
+        </select>` : ''}
     `;
+    const assign = el.querySelector('.history-assign');
+    if (assign) assign.onchange = async () => {
+      if (!assign.value) return;
+      w.dayId = Number(assign.value);
+      await dbPut('workouts', w);
+      showToast('Assigned to ' + workoutTitle(w), 'success');
+      renderHistory();
+      renderHome();
+    };
     el.querySelector('.history-delete').onclick = async () => {
       const when = new Date(w.date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-      const what = hasLifting(w) ? `Day ${w.dayId}: ${day?.label || '?'}` : 'cardio';
+      const what = workoutTitle(w);
       if (!confirm(`Delete the ${what} workout from ${when}? This can't be undone.`)) return;
       await dbDelete('workouts', w.id);
       showToast('Workout deleted', 'success');
@@ -777,8 +946,10 @@ async function renderProgress() {
   });
   sel.onchange = () => renderWeightChart(workouts, sel.value);
 
+  updateProgressLabels();
   renderWorkoutsChart(workouts);
   renderCardioChart(workouts);
+  renderAzmChart(workouts);
 }
 
 async function refreshProgress() {
@@ -807,27 +978,76 @@ function chartDefaults() {
 const SERIES_COLORS = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#0ca30c', '#9085e9', '#e66767'];
 const OTHER_COLOR   = '#6b6b68';
 const CHART_SURFACE = '#1a1a1a';
-const MAX_WEEKS     = 16; // keep bars readable on a phone
 
-// Every week (Sunday start) from the first workout to this week, oldest first,
-// including empty weeks so gaps are visible
-function weekBuckets(workouts) {
-  const thisWeek = getWeekStart(new Date());
-  let start = thisWeek;
-  workouts.forEach(w => {
-    const ws = getWeekStart(new Date(w.date));
-    if (ws < start) start = ws;
-  });
-  const weeks = [];
-  for (let d = new Date(start); d <= thisWeek; d.setDate(d.getDate() + 7)) {
-    weeks.push(localDateStr(d));
-  }
-  return weeks.slice(-MAX_WEEKS);
+// Time range toggle. Short ranges use weekly bars; longer ranges switch to
+// monthly bars so a year stays readable on a phone (13 bars instead of 52).
+const RANGES = {
+  '1m': { months: 1,  unit: 'week'  },
+  '3m': { months: 3,  unit: 'week'  },
+  '6m': { months: 6,  unit: 'month' },
+  '1y': { months: 12, unit: 'month' }
+};
+let progressRange = '1m';
+const rangeUnit = () => RANGES[progressRange].unit;
+
+function rangeStart() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  d.setMonth(d.getMonth() - RANGES[progressRange].months);
+  return d;
 }
 
-const weekKey = w => localDateStr(getWeekStart(new Date(w.date)));
-const weekLabel = key =>
-  parseLocalDate(key).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+const pad2 = n => String(n).padStart(2, '0');
+const monthKey = d => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
+
+// Every period (week or month) in the selected range, oldest first,
+// including empty ones so gaps are visible
+function periodBuckets() {
+  const start = rangeStart(), keys = [];
+  if (rangeUnit() === 'week') {
+    const thisWeek = getWeekStart(new Date());
+    for (let d = getWeekStart(start); d <= thisWeek; d.setDate(d.getDate() + 7)) keys.push(localDateStr(d));
+  } else {
+    const end = new Date();
+    for (let d = new Date(start.getFullYear(), start.getMonth(), 1); d <= end; d.setMonth(d.getMonth() + 1)) {
+      keys.push(monthKey(d));
+    }
+  }
+  return keys;
+}
+
+const periodKey = w => rangeUnit() === 'week'
+  ? localDateStr(getWeekStart(new Date(w.date)))
+  : monthKey(new Date(w.date));
+
+function periodLabel(key) {
+  if (rangeUnit() === 'week') {
+    return parseLocalDate(key).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  }
+  const [y, m] = key.split('-').map(Number);
+  const label = new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'short' });
+  return y === new Date().getFullYear() ? label : `${label} '${String(y).slice(2)}`;
+}
+
+const inRange = w => new Date(w.date) >= (rangeUnit() === 'week' ? getWeekStart(rangeStart()) : rangeStart());
+
+function setupRangeToggle() {
+  document.querySelectorAll('#range-toggle button').forEach(btn => {
+    btn.onclick = () => {
+      progressRange = btn.dataset.range;
+      document.querySelectorAll('#range-toggle button').forEach(b =>
+        b.classList.toggle('active', b === btn));
+      refreshProgress();
+    };
+  });
+}
+
+function updateProgressLabels() {
+  const per = rangeUnit() === 'week' ? 'WEEK' : 'MONTH';
+  document.getElementById('label-workouts').textContent = `WORKOUTS PER ${per}`;
+  document.getElementById('label-cardio').textContent   = `CARDIO MINUTES PER ${per}`;
+  document.getElementById('label-azm').textContent      = `ACTIVE ZONE MINUTES PER ${per}`;
+}
 
 function stackedBarOptions(yTitle, unit) {
   const base = chartDefaults();
@@ -843,7 +1063,7 @@ function stackedBarOptions(yTitle, unit) {
       tooltip: {
         filter: item => item.raw > 0,
         callbacks: {
-          title: items => 'Week of ' + items[0].label,
+          title: items => (rangeUnit() === 'week' ? 'Week of ' : '') + items[0].label,
           label: item => ` ${item.dataset.label}: ${item.raw}${unit}`,
           footer: items => 'Total: ' + items.reduce((s, i) => s + i.raw, 0) + unit
         }
@@ -871,58 +1091,65 @@ function stackedDataset(label, data, color) {
   };
 }
 
-// Workouts per week, stacked by training day so a missed day stands out
-function renderWorkoutsChart(workouts) {
-  const weeks = weekBuckets(workouts);
-  const datasets = exercises.days.map((day, i) => {
-    const data = weeks.map(wk =>
-      workouts.filter(w => hasLifting(w) && w.dayId === day.id && weekKey(w) === wk).length);
-    return stackedDataset(`D${day.id}: ${day.label}`, data, SERIES_COLORS[i] || OTHER_COLOR);
-  });
-
-  const ctx = document.getElementById('chart-workouts').getContext('2d');
-  if (progressCharts.workouts) progressCharts.workouts.destroy();
-  progressCharts.workouts = new Chart(ctx, {
-    type: 'bar',
-    data: { labels: weeks.map(weekLabel), datasets },
-    options: (() => {
-      const o = stackedBarOptions('Workouts', '');
-      o.scales.y.suggestedMax = 5; // weekly goal ceiling; grows past 5 if ever exceeded
-      return o;
-    })()
-  });
+function drawChart(key, canvasId, labels, datasets, options) {
+  const ctx = document.getElementById(canvasId).getContext('2d');
+  if (progressCharts[key]) progressCharts[key].destroy();
+  progressCharts[key] = new Chart(ctx, { type: 'bar', data: { labels, datasets }, options });
 }
 
-// Cardio minutes per week, stacked by cardio type. Types past the 8th color
-// fold into "Other" rather than reusing a color.
+// Workouts per period, stacked by training day so a missed day stands out.
+// Fitbit lifting sessions not yet assigned to a day show as a gray "Unassigned" segment.
+function renderWorkoutsChart(workouts) {
+  const periods = periodBuckets();
+  const lifts = workouts.filter(isLiftWorkout);
+  const count = pred => periods.map(p => lifts.filter(w => pred(w) && periodKey(w) === p).length);
+
+  const datasets = exercises.days.map((day, i) =>
+    stackedDataset(`D${day.id}: ${day.label}`, count(w => w.dayId === day.id), SERIES_COLORS[i] || OTHER_COLOR));
+  const unassigned = count(w => !w.dayId);
+  if (unassigned.some(n => n)) datasets.push(stackedDataset('Unassigned', unassigned, OTHER_COLOR));
+
+  const options = stackedBarOptions('Workouts', '');
+  if (rangeUnit() === 'week') options.scales.y.suggestedMax = 5; // weekly goal ceiling
+  drawChart('workouts', 'chart-workouts', periods.map(periodLabel), datasets, options);
+}
+
+// Cardio types past the 8th color fold into "Other" rather than reusing a color
 function cardioGroup(type) {
   const idx = exercises.cardioTypes.indexOf(type);
   return idx >= 0 && idx < SERIES_COLORS.length && type !== 'Other' ? type : 'Other';
 }
 
-// Each cardio entry is its own segment (with a thin gap), so 10+10+40 min
-// reads differently from 20+20+20 even when it's all one type
+// Cardio minutes, stacked by type. Weekly view draws each cardio entry as its
+// own segment so 10+10+40 min reads differently from 20+20+20; monthly view
+// sums per type (dozens of slivers per bar would be unreadable).
 function renderCardioChart(workouts) {
-  const weeks = weekBuckets(workouts);
-  const entries = {}; // group -> { week -> [minutes, ...] } in logged order
+  const periods = periodBuckets();
+  const perEntry = rangeUnit() === 'week';
+  const entries = {}; // group -> { period -> [minutes, ...] } in logged order
   [...workouts].sort((a, b) => new Date(a.date) - new Date(b.date)).forEach(w =>
     (w.cardio || []).forEach(c => {
-      const g = cardioGroup(c.type), wk = weekKey(w);
+      const g = cardioGroup(c.type), p = periodKey(w);
       entries[g] ??= {};
-      (entries[g][wk] ??= []).push(Number(c.minutes) || 0);
+      (entries[g][p] ??= []).push(Number(c.minutes) || 0);
     }));
 
-  // Fixed order from cardioTypes, only types actually logged; Other last
   const groups = exercises.cardioTypes.map(cardioGroup)
-    .filter((g, i, arr) => arr.indexOf(g) === i && entries[g])
+    .filter((g, i, arr) => arr.indexOf(g) === i && entries[g] && periods.some(p => entries[g][p]))
     .sort((a, b) => (a === 'Other') - (b === 'Other'));
 
   const datasets = [];
   groups.forEach(g => {
     const color = g === 'Other' ? OTHER_COLOR : SERIES_COLORS[exercises.cardioTypes.indexOf(g)];
-    const slots = Math.max(...weeks.map(wk => entries[g][wk]?.length || 0), 1);
+    if (!perEntry) {
+      const ds = stackedDataset(g, periods.map(p => (entries[g][p] || []).reduce((a, b) => a + b, 0)), color);
+      ds.firstOfType = true;
+      datasets.push(ds);
+      return;
+    }
+    const slots = Math.max(...periods.map(p => entries[g][p]?.length || 0), 1);
     for (let k = 0; k < slots; k++) {
-      const ds = stackedDataset(g, weeks.map(wk => entries[g][wk]?.[k] || 0), color);
+      const ds = stackedDataset(g, periods.map(p => entries[g][p]?.[k] || 0), color);
       ds.firstOfType = k === 0;
       datasets.push(ds);
     }
@@ -931,20 +1158,33 @@ function renderCardioChart(workouts) {
   const options = stackedBarOptions('Minutes', ' min');
   options.plugins.legend.labels.filter = item => datasets[item.datasetIndex].firstOfType;
   options.plugins.legend.onClick = () => {}; // types span several datasets; keep legend static
+  drawChart('cardio', 'chart-cardio', periods.map(periodLabel), datasets, options);
+}
 
-  const ctx = document.getElementById('chart-cardio').getContext('2d');
-  if (progressCharts.cardio) progressCharts.cardio.destroy();
-  progressCharts.cardio = new Chart(ctx, {
-    type: 'bar',
-    data: { labels: weeks.map(weekLabel), datasets },
-    options
+// Active Zone Minutes from Fitbit, split into cardio vs lifting sessions
+function renderAzmChart(workouts) {
+  const periods = periodBuckets();
+  const cardio = periods.map(() => 0), lifting = periods.map(() => 0);
+  let any = false;
+  workouts.forEach(w => {
+    const i = periods.indexOf(periodKey(w));
+    if (i < 0) return;
+    (w.cardio || []).forEach(c => { if (c.azm) { cardio[i] += c.azm; any = true; } });
+    if (w.fitbit?.isLift && w.fitbit.azm) { lifting[i] += w.fitbit.azm; any = true; }
   });
+
+  document.getElementById('azm-empty').classList.toggle('hidden', any);
+  const datasets = [
+    stackedDataset('Cardio', cardio, SERIES_COLORS[0]),
+    stackedDataset('Lifting', lifting, SERIES_COLORS[1])
+  ];
+  drawChart('azm', 'chart-azm', periods.map(periodLabel), datasets, stackedBarOptions('AZM', ' AZM'));
 }
 
 function renderWeightChart(workouts, exId) {
   if (!exId) return;
   const points = workouts
-    .filter(w => w.sets?.[exId]?.length)
+    .filter(w => w.sets?.[exId]?.length && inRange(w))
     .sort((a, b) => new Date(a.date) - new Date(b.date))
     .map(w => ({
       x: new Date(w.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
@@ -1011,6 +1251,7 @@ async function loadSettings() {
 
   document.getElementById('send-recap-btn').onclick  = sendRecap;
   document.getElementById('export-btn').onclick      = exportData;
+  document.getElementById('fitbit-sync-btn').onclick = syncFitbitHistory;
   document.getElementById('clear-data-btn').onclick  = clearData;
 }
 
@@ -1072,7 +1313,7 @@ async function buildRecapBody() {
     const day = exercises.days.find(d => d.id === w.dayId);
     body += `────────────────────────\n`;
     body += `${new Date(w.date).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}\n`;
-    body += `Day ${w.dayId}: ${day?.label}\n\n`;
+    body += `${workoutTitle(w)}\n\n`;
 
     Object.entries(w.sets || {}).forEach(([exId, sets]) => {
       const ex = day?.exercises.find(e => e.id === exId);
@@ -1096,9 +1337,9 @@ async function buildRecapBody() {
 
   // PRs this week
   body += '════════════════════════\nNEXT WEEK BASELINES\n\n';
-  week.forEach(w => {
+  week.filter(hasLifting).forEach(w => {
     const day = exercises.days.find(d => d.id === w.dayId);
-    body += `Day ${w.dayId}: ${day?.label}\n`;
+    body += `${workoutTitle(w)}\n`;
     Object.entries(w.sets || {}).forEach(([exId, sets]) => {
       const ex   = day?.exercises.find(e => e.id === exId);
       const best = sets.reduce((b, s) => {

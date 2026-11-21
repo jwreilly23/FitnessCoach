@@ -494,3 +494,22 @@ canvas { max-height: 220px; }
 .fitbit-meta { font-size: 12px; color: var(--muted); margin-top: 2px; }
 .fitbit-add { width: auto; flex: none; padding: 6px 12px; font-size: 13px; }
 .fitbit-add:disabled { opacity: 0.6; }
+
+/* Progress time range toggle */
+.range-toggle {
+  display: flex; gap: 4px; margin-top: 12px; padding: 4px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+}
+.range-toggle button {
+  flex: 1; background: none; border: none; color: var(--muted);
+  font-size: 13px; font-weight: 600; padding: 8px 0; border-radius: 7px; cursor: pointer;
+}
+.range-toggle button.active { background: var(--accent); color: #fff; }
+.azm-empty { font-size: 13px; margin-bottom: 8px; }
+.hidden.azm-empty { display: none; }
+
+/* Fitbit details in History */
+.history-fitbit { font-size: 12px; color: var(--muted); margin-top: 4px; }
+.history-assign { margin-top: 10px; font-size: 13px; padding: 8px 10px; }
+#fitbit-sync-status { font-size: 13px; }
+#fitbit-sync-btn:disabled { opacity: 0.6; }
