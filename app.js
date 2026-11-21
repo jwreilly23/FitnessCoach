@@ -567,6 +567,9 @@ async function renderHistory() {
     const el = document.createElement('div');
     el.className = 'history-item';
     el.innerHTML = `
+      <button class="history-delete" title="Delete workout" aria-label="Delete workout">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M6 19a2 2 0 002 2h8a2 2 0 002-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+      </button>
       <div class="history-date">${new Date(w.date).toLocaleDateString('en-US',
         { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' })}</div>
       <div class="history-title">${hasLifting(w) ? `Day ${w.dayId}: ${day?.label || '?'}` : 'Cardio'}</div>
@@ -580,6 +583,16 @@ async function renderHistory() {
         ${(w.cardio || []).map(c => `<li>${c.type} — ${c.minutes} min</li>`).join('')}
       </ul>
     `;
+    el.querySelector('.history-delete').onclick = async () => {
+      const when = new Date(w.date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+      const what = hasLifting(w) ? `Day ${w.dayId}: ${day?.label || '?'}` : 'cardio';
+      if (!confirm(`Delete the ${what} workout from ${when}? This can't be undone.`)) return;
+      await dbDelete('workouts', w.id);
+      showToast('Workout deleted', 'success');
+      await renderHistory();
+      await renderHome();
+      if (editingWorkout?.id === w.id) initSessionForDay(activeDay); // Log page was showing it
+    };
     list.appendChild(el);
   });
 }
