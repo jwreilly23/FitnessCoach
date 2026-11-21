@@ -1184,7 +1184,7 @@ function drawChart(key, canvasId, labels, datasets, options) {
 
 // A day counts as a workout day if it has 30+ cardio load (Active Zone Minutes
 // from Fitbit, across cardio and lifting), or more than 30 min of weightlifting.
-// Cardio typed in without Fitbit data counts its minutes as load; lifting logged
+// Cardio without an AZM value (hand-typed, or Fitbit didn't report one) counts its minutes as load; lifting logged
 // with sets but no Fitbit duration counts as a full session.
 const WORKOUT_DAY_MIN_LOAD = 30;
 const WORKOUT_DAY_MIN_LIFT = 30;
@@ -1192,7 +1192,8 @@ const WORKOUT_DAY_MIN_LIFT = 30;
 function dayLoad(dayWorkouts) {
   return dayWorkouts.reduce((sum, w) =>
     sum + (w.fitbit?.azm || 0) +
-    (w.cardio || []).reduce((s, c) => s + (c.azm ?? (c.fitbitId ? 0 : Number(c.minutes) || 0)), 0), 0);
+    // AZM when known; otherwise (hand-typed, or Fitbit sent no AZM) the minutes stand in
+    (w.cardio || []).reduce((s, c) => s + (c.azm ?? (Number(c.minutes) || 0)), 0), 0);
 }
 
 function isWorkoutDay(dayWorkouts) {
