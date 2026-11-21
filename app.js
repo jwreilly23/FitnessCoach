@@ -667,7 +667,7 @@ function renderFitbitList() {
 }
 
 // ── FITBIT HISTORY SYNC ──────────────────────────────────
-// Pulls the last 12 months of Fitbit exercise sessions. Re-runnable: sessions
+// Pulls every Fitbit exercise session on the account. Re-runnable: sessions
 // already imported are skipped. Cardio becomes cardio-only entries; lifting
 // becomes an "Unassigned" lifting entry, or attaches its Fitbit stats (AZM,
 // heart rate) to a workout you already logged that day.
@@ -681,12 +681,12 @@ const FITBIT_OTHER_CARDIO = new Set(['HIIT', 'CARDIO_WORKOUT', 'AEROBIC_WORKOUT'
 const fitbitMeta = s => ({ id: s.id, type: s.exerciseType, name: s.name, isLift: s.isLift,
   minutes: s.minutes, azm: s.azm, avgHr: s.avgHr, calories: s.calories });
 
-async function fetchFitbitRange(sinceDateStr, token, onPage) {
-  const filter = `exercise.interval.civil_start_time >= "${sinceDateStr}"`;
+// Every exercise session Fitbit has, newest first, 25 per request
+async function fetchFitbitAll(token, onPage) {
   const all = [];
   let pageToken = '';
-  for (let page = 0; page < 60; page++) { // 25 per page; 60 pages = 1500 sessions max
-    const url = `${FITBIT.api}/exercise/dataPoints?pageSize=25&filter=${encodeURIComponent(filter)}` +
+  for (let page = 0; page < 400; page++) { // safety cap: 10,000 sessions
+    const url = `${FITBIT.api}/exercise/dataPoints?pageSize=25` +
                 (pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : '');
     const resp = await fetch(url, { headers: { Authorization: 'Bearer ' + token } });
     if (resp.status === 401) {
@@ -711,8 +711,6 @@ async function fetchFitbitRange(sinceDateStr, token, onPage) {
 function syncFitbitHistory() {
   const status = document.getElementById('fitbit-sync-status');
   const btn = document.getElementById('fitbit-sync-btn');
-  const since = new Date();
-  since.setFullYear(since.getFullYear() - 1);
   status.classList.remove('fitbit-error');
   status.textContent = 'Signing in…';
   btn.disabled = true;
@@ -720,7 +718,7 @@ function syncFitbitHistory() {
   getFitbitToken() // called straight from the tap so the sign-in popup isn't blocked
     .then(token => {
       status.textContent = 'Downloading Fitbit workouts…';
-      return fetchFitbitRange(localDateStr(since), token,
+      return fetchFitbitAll(token,
         n => { status.textContent = `Downloading Fitbit workouts… ${n} found`; });
     })
     .then(importFitbitSessions)
@@ -934,6 +932,9 @@ async function renderHistory() {
 // ── PROGRESS ─────────────────────────────────────────────
 async function renderProgress() {
   const workouts = await dbGetAll('workouts');
+  earliestWorkout = workouts.length
+    ? new Date(Math.min(...workouts.map(w => new Date(w.date).getTime())))
+    : null;
 
   // Populate exercise selector
   const sel = document.getElementById('progress-exercise-select');
@@ -985,12 +986,18 @@ const RANGES = {
   '1m': { months: 1,  unit: 'week'  },
   '3m': { months: 3,  unit: 'week'  },
   '6m': { months: 6,  unit: 'month' },
-  '1y': { months: 12, unit: 'month' }
+  '1y': { months: 12, unit: 'month' },
+  'all': { months: null, unit: 'month' } // back to the first logged or imported workout
 };
 let progressRange = '1m';
+let earliestWorkout = null; // set by renderProgress, used for the All range
 const rangeUnit = () => RANGES[progressRange].unit;
 
 function rangeStart() {
+  if (!RANGES[progressRange].months) {
+    const first = earliestWorkout || new Date();
+    return new Date(first.getFullYear(), first.getMonth(), 1);
+  }
   const d = new Date();
   d.setHours(0, 0, 0, 0);
   d.setMonth(d.getMonth() - RANGES[progressRange].months);
