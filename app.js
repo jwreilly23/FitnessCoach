@@ -728,14 +728,34 @@ function renderFitbitList() {
 
 // Minutes of a session with heart rate above CARDIO_HR_BPM, from 1-minute heart-rate
 // rollups over just that session's time window. null if the watch recorded no heart rate.
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// POST with retries: waits and retries when Google says "slow down" (429) or has a
+// temporary server error, up to 6 tries with growing waits (about 1 min in total)
+async function fitbitPost(url, body, token) {
+  for (let attempt = 0; ; attempt++) {
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (resp.status === 401) {
+      fitbitToken = null;
+      try { sessionStorage.removeItem('fitbitToken'); } catch {}
+      throw new Error('Google sign-in expired.');
+    }
+    const retryable = resp.status === 429 || resp.status >= 500;
+    if (!retryable || attempt >= 5) return resp;
+    const wait = Number(resp.headers.get('Retry-After')) * 1000 || 2000 * 2 ** attempt;
+    await sleep(Math.min(wait, 30000));
+  }
+}
+
 async function fetchHrMinutes(startTime, endTime, token) {
   let count = 0, any = false, pageToken = '';
   for (let page = 0; page < 20; page++) {
-    const resp = await fetch(`${FITBIT.api}/heart-rate/dataPoints:rollUp`, {
-      method: 'POST',
-      headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ range: { startTime, endTime }, windowSize: '60s', ...(pageToken ? { pageToken } : {}) })
-    });
+    const resp = await fitbitPost(`${FITBIT.api}/heart-rate/dataPoints:rollUp`,
+      { range: { startTime, endTime }, windowSize: '60s', ...(pageToken ? { pageToken } : {}) }, token);
     if (!resp.ok) {
       let detail = '';
       try { detail = (await resp.json()).error?.message || ''; } catch {}
@@ -761,19 +781,29 @@ async function updateHrMinutes(token, onProgress = () => {}) {
   workouts.forEach(w => (w.cardio || []).forEach(c => {
     if (c.fitbitId && c.fitbitStart && c.fitbitEnd && !c.hrChecked) todo.push({ w, c });
   }));
-  let done = 0;
+  let done = 0, failed = null;
+  const total = todo.length;
   const worker = async () => {
-    while (todo.length) {
+    while (todo.length && !failed) { // stop all workers once one hits an error
       const { w, c } = todo.shift();
-      c.hrMinutes = await fetchHrMinutes(c.fitbitStart, c.fitbitEnd, token);
+      try {
+        c.hrMinutes = await fetchHrMinutes(c.fitbitStart, c.fitbitEnd, token);
+      } catch (err) {
+        failed = failed || err;
+        return;
+      }
       c.hrChecked = true;
       applyCardioMinutes(c);
-      await dbPut('workouts', w);
-      onProgress(++done);
+      await dbPut('workouts', w); // saved one by one, so progress survives an error
+      done++;
+      if (!failed) onProgress(done, total);
     }
   };
-  const total = todo.length;
-  await Promise.all([worker(), worker(), worker(), worker()]); // 4 at a time
+  await Promise.all([worker(), worker(), worker()]); // 3 at a time
+  if (failed) {
+    throw new Error(`Stopped checking heart rate: ${failed.message.trim().replace(/\.?$/, '.')} ` +
+      `${done} of ${total} workouts were checked and saved. Tap a Sync button again to finish the rest.`);
+  }
   return total;
 }
 
@@ -842,15 +872,11 @@ async function fetchFitbitSteps(fromDateStr, token, onChunk = () => {}) {
     const end = new Date(start);
     end.setDate(end.getDate() + 89);
     if (end > today) end.setTime(today.getTime());
-    const resp = await fetch(`${FITBIT.api}/steps/dataPoints:dailyRollUp`, {
-      method: 'POST',
-      headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        range: { start: civil(localDateStr(start)), end: civil(localDateStr(end), true) },
-        windowSizeDays: 1,
-        pageSize: 90
-      })
-    });
+    const resp = await fitbitPost(`${FITBIT.api}/steps/dataPoints:dailyRollUp`, {
+      range: { start: civil(localDateStr(start)), end: civil(localDateStr(end), true) },
+      windowSizeDays: 1,
+      pageSize: 90
+    }, token);
     if (!resp.ok) {
       let detail = '';
       try { detail = (await resp.json()).error?.message || ''; } catch {}
@@ -890,7 +916,7 @@ function syncFitbitHistory(days = null) {
     .then(async summary => {
       status.textContent = 'Checking heart rate during workouts…';
       const checked = await updateHrMinutes(fitbitToken.value,
-        n => { status.textContent = `Checking heart rate during workouts… ${n} done`; });
+        (n, total) => { status.textContent = `Checking heart rate during workouts… ${n} of ${total}`; });
       return summary + (checked ? ` Heart rate checked for ${checked} cardio session${checked === 1 ? '' : 's'}.` : '');
     })
     .then(async summary => {
