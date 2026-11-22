@@ -1,5 +1,5 @@
 // App code cache: bump the version when precached files change.
-const CACHE = 'fitnesscoach-v30';
+const CACHE = 'fitnesscoach-v31';
 // Exercise photos live in their own cache so app updates don't re-download them.
 const IMAGE_CACHE = 'fitnesscoach-images-v1';
 const KEEP = [CACHE, IMAGE_CACHE];

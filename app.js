@@ -1352,6 +1352,13 @@ function stackedBarOptions(yTitle, unit) {
   };
 }
 
+// Mix a hex color toward white (amount 0–1)
+function lighten(hex, amount) {
+  const n = parseInt(hex.slice(1), 16);
+  const ch = shift => Math.round(((n >> shift) & 255) + (255 - ((n >> shift) & 255)) * amount);
+  return '#' + [16, 8, 0].map(sh => ch(sh).toString(16).padStart(2, '0')).join('');
+}
+
 function stackedDataset(label, data, color) {
   return {
     label, data,
@@ -1359,7 +1366,11 @@ function stackedDataset(label, data, color) {
     borderColor: CHART_SURFACE,  // thin gap between stacked segments
     borderWidth: { top: 2 },
     borderSkipped: 'start',
-    borderRadius: 4              // Chart.js rounds only the top of each stack
+    borderRadius: 4,             // Chart.js rounds only the top of each stack
+    // Selected (tapped) bar: lighter fill with a white outline so it's easy to spot
+    hoverBackgroundColor: lighten(color, 0.35),
+    hoverBorderColor: '#ffffff',
+    hoverBorderWidth: 2
   };
 }
 
