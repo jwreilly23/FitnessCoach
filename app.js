@@ -109,22 +109,26 @@ async function boot() {
   setupRangeToggle();
 }
 
-// Cardio minutes never exceed Active Zone Minutes when Fitbit AZM is known,
-// so long low-effort sessions (a 4-hour hike with 45 AZM) don't skew cardio
-// totals. The full duration is kept as fitbitMinutes for display.
-function capCardioToAzm(c) {
-  if (c.azm == null) return false;
+// Cardio minutes for Fitbit-recorded sessions = minutes of that session with
+// heart rate above 80 bpm (hrMinutes, from Fitbit's per-minute heart rate), so
+// long easy sessions like hikes don't skew cardio totals. Until heart rate has
+// been checked (or if the watch recorded none), the full session length is used.
+// The full length is always kept as fitbitMinutes.
+const CARDIO_HR_BPM = 80;
+
+function applyCardioMinutes(c) {
+  if (!c.fitbitId) return false;
   const full = c.fitbitMinutes ?? c.minutes;
-  const capped = Math.min(full, c.azm);
-  if (c.minutes === capped && (full === capped || c.fitbitMinutes === full)) return false;
-  if (full > capped) c.fitbitMinutes = full;
-  c.minutes = capped;
+  const minutes = c.hrMinutes ?? full;
+  if (c.fitbitMinutes === full && c.minutes === minutes) return false;
+  c.fitbitMinutes = full;
+  c.minutes = minutes;
   return true;
 }
 
 // Data fixes run on load:
 // - outdoor cycling was always lawn mowing
-// - Fitbit cardio minutes capped at AZM
+// - Fitbit cardio minutes follow the heart-rate rule (undoes the old AZM cap)
 // - Fitbit-imported walk/hike entries below the workout bar are removed
 //   (only standalone entries that contain nothing else)
 async function migrateCardioTypes() {
@@ -137,7 +141,7 @@ async function migrateCardioTypes() {
     let changed = false;
     (w.cardio || []).forEach(c => {
       if (renames[c.type]) { c.type = renames[c.type]; changed = true; }
-      if (capCardioToAzm(c)) changed = true;
+      if (applyCardioMinutes(c)) changed = true;
     });
     if (changed) await dbPut('workouts', w);
   }
@@ -543,7 +547,9 @@ function renderCardioList() {
 // (no server): an access token lasts about an hour, then Google asks again.
 const FITBIT = {
   clientId: '32159203608-v1u4lc1j6c4lg4306omusfa1sn5kr770.apps.googleusercontent.com',
-  scope:    'https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly',
+  // activity: workouts and steps; health metrics: heart rate during workouts
+  scope:    'https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly ' +
+            'https://www.googleapis.com/auth/googlehealth.health_metrics_and_measurements.readonly',
   api:      'https://health.googleapis.com/v4/users/me/dataTypes'
 };
 
@@ -574,7 +580,9 @@ let fitbitSessions = [];
 
 // Must be called straight from a tap (no await before it) so the sign-in popup isn't blocked
 function getFitbitToken() {
-  if (fitbitToken && fitbitToken.expires > Date.now() + 60000) return Promise.resolve(fitbitToken.value);
+  if (fitbitToken && fitbitToken.scope === FITBIT.scope && fitbitToken.expires > Date.now() + 60000) {
+    return Promise.resolve(fitbitToken.value);
+  }
   return new Promise((resolve, reject) => {
     if (!window.google?.accounts?.oauth2) {
       reject(new Error('Google sign-in didn\'t load. Check your connection and try again.'));
@@ -588,7 +596,8 @@ function getFitbitToken() {
           reject(new Error('Sign-in was cancelled or failed (' + (resp.error || 'no token') + ').'));
           return;
         }
-        fitbitToken = { value: resp.access_token, expires: Date.now() + (resp.expires_in || 3600) * 1000 };
+        fitbitToken = { value: resp.access_token, scope: FITBIT.scope,
+                        expires: Date.now() + (resp.expires_in || 3600) * 1000 };
         try { sessionStorage.setItem('fitbitToken', JSON.stringify(fitbitToken)); } catch {}
         resolve(fitbitToken.value);
       },
@@ -662,7 +671,8 @@ function fitbitSessionInfo(dp) {
     avgHr: m.averageHeartRateBeatsPerMinute ? Number(m.averageHeartRateBeatsPerMinute) : null,
     azm: m.activeZoneMinutes ? Number(m.activeZoneMinutes) : null,
     exerciseType: ex.exerciseType,
-    startTime: ex.interval.startTime
+    startTime: ex.interval.startTime,
+    endTime: ex.interval.endTime
   };
 }
 
@@ -695,10 +705,17 @@ function renderFitbitList() {
       btn.className = 'btn btn-secondary fitbit-add';
       btn.textContent = added ? 'Added ✓' : 'Add';
       btn.disabled = added;
-      btn.onclick = () => {
-        const entry = { type: s.cardioType, minutes: s.minutes, fitbitId: s.id,
+      btn.onclick = async () => {
+        btn.disabled = true;
+        btn.textContent = 'Adding…';
+        const entry = { type: s.cardioType, minutes: s.minutes, fitbitMinutes: s.minutes, fitbitId: s.id,
+                        fitbitStart: s.startTime, fitbitEnd: s.endTime,
                         azm: s.azm, avgHr: s.avgHr, calories: s.calories };
-        capCardioToAzm(entry);
+        try {
+          entry.hrMinutes = await fetchHrMinutes(s.startTime, s.endTime, fitbitToken.value);
+          entry.hrChecked = true;
+        } catch { /* keep full length; the next sync will retry */ }
+        applyCardioMinutes(entry);
         sessionCardio.push(entry);
         renderCardioList();
         renderFitbitList();
@@ -707,6 +724,57 @@ function renderFitbitList() {
     }
     list.appendChild(row);
   });
+}
+
+// Minutes of a session with heart rate above CARDIO_HR_BPM, from 1-minute heart-rate
+// rollups over just that session's time window. null if the watch recorded no heart rate.
+async function fetchHrMinutes(startTime, endTime, token) {
+  let count = 0, any = false, pageToken = '';
+  for (let page = 0; page < 20; page++) {
+    const resp = await fetch(`${FITBIT.api}/heart-rate/dataPoints:rollUp`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ range: { startTime, endTime }, windowSize: '60s', ...(pageToken ? { pageToken } : {}) })
+    });
+    if (!resp.ok) {
+      let detail = '';
+      try { detail = (await resp.json()).error?.message || ''; } catch {}
+      throw new Error(`Fitbit heart-rate request failed (${resp.status}). ${detail}`);
+    }
+    const data = await resp.json();
+    (data.rollupDataPoints || []).forEach(p => {
+      const bpm = p.heartRate?.beatsPerMinuteAvg;
+      if (bpm == null) return;
+      any = true;
+      if (bpm > CARDIO_HR_BPM) count++;
+    });
+    pageToken = data.nextPageToken;
+    if (!pageToken) break;
+  }
+  return any ? count : null;
+}
+
+// Work out heart-rate minutes for every Fitbit cardio entry that hasn't been checked yet
+async function updateHrMinutes(token, onProgress = () => {}) {
+  const workouts = await dbGetAll('workouts');
+  const todo = [];
+  workouts.forEach(w => (w.cardio || []).forEach(c => {
+    if (c.fitbitId && c.fitbitStart && c.fitbitEnd && !c.hrChecked) todo.push({ w, c });
+  }));
+  let done = 0;
+  const worker = async () => {
+    while (todo.length) {
+      const { w, c } = todo.shift();
+      c.hrMinutes = await fetchHrMinutes(c.fitbitStart, c.fitbitEnd, token);
+      c.hrChecked = true;
+      applyCardioMinutes(c);
+      await dbPut('workouts', w);
+      onProgress(++done);
+    }
+  };
+  const total = todo.length;
+  await Promise.all([worker(), worker(), worker(), worker()]); // 4 at a time
+  return total;
 }
 
 // ── FITBIT HISTORY SYNC ──────────────────────────────────
@@ -820,6 +888,12 @@ function syncFitbitHistory(days = null) {
     })
     .then(importFitbitSessions)
     .then(async summary => {
+      status.textContent = 'Checking heart rate during workouts…';
+      const checked = await updateHrMinutes(fitbitToken.value,
+        n => { status.textContent = `Checking heart rate during workouts… ${n} done`; });
+      return summary + (checked ? ` Heart rate checked for ${checked} cardio session${checked === 1 ? '' : 's'}.` : '');
+    })
+    .then(async summary => {
       const workouts = await dbGetAll('workouts');
       const earliest = since || (workouts.length
         ? new Date(Math.min(...workouts.map(w => new Date(w.date).getTime())))
@@ -856,9 +930,21 @@ async function importFitbitSessions(dataPoints) {
   const skipped = {};
   const sameDay = (w, dateStr) => localDateStr(new Date(w.date)) === dateStr;
 
+  const entryById = {};
+  workouts.forEach(w => (w.cardio || []).forEach(c => { if (c.fitbitId) entryById[c.fitbitId] = { w, c }; }));
+
   for (const dp of dataPoints) {
     const s = fitbitSessionInfo(dp);
-    if (known.has(s.id)) { n.already++; continue; }
+    if (known.has(s.id)) {
+      n.already++;
+      // Older imports didn't keep the session's time window; add it so heart rate can be checked
+      const hit = entryById[s.id];
+      if (hit && !hit.c.fitbitStart) {
+        Object.assign(hit.c, { fitbitStart: s.startTime, fitbitEnd: s.endTime });
+        await dbPut('workouts', hit.w);
+      }
+      continue;
+    }
     const dateStr = localDateStr(new Date(s.startTime));
 
     if (s.isLift) {
@@ -879,16 +965,17 @@ async function importFitbitSessions(dataPoints) {
       skipped[`${s.name} (short/easy)`] = (skipped[`${s.name} (short/easy)`] || 0) + 1;
       continue;
     } else if (FITBIT_CARDIO_MAP[s.exerciseType] || FITBIT_OTHER_CARDIO.has(s.exerciseType)) {
-      const entry = { type: s.cardioType, minutes: s.minutes, fitbitId: s.id,
+      const entry = { type: s.cardioType, minutes: s.minutes, fitbitMinutes: s.minutes, fitbitId: s.id,
+                      fitbitStart: s.startTime, fitbitEnd: s.endTime,
                       azm: s.azm, avgHr: s.avgHr, calories: s.calories };
-      capCardioToAzm(entry);
       // A cardio entry you typed in by hand that day with the same type is the same session
       const logged = workouts.find(w => sameDay(w, dateStr) &&
         (w.cardio || []).some(c => !c.fitbitId && c.type === s.cardioType));
       if (logged) {
         const c = logged.cardio.find(c => !c.fitbitId && c.type === s.cardioType);
-        Object.assign(c, { fitbitId: s.id, azm: s.azm, avgHr: s.avgHr, calories: s.calories });
-        capCardioToAzm(c);
+        Object.assign(c, { fitbitId: s.id, fitbitMinutes: s.minutes, fitbitStart: s.startTime,
+                           fitbitEnd: s.endTime, azm: s.azm, avgHr: s.avgHr, calories: s.calories });
+        applyCardioMinutes(c);
         await dbPut('workouts', logged);
         n.cardioMatched++;
       } else {
@@ -1025,7 +1112,7 @@ async function renderHistory() {
           w.fitbit.calories ? `${w.fitbit.calories} cal` : ''].filter(Boolean).join(' · ')}</div>` : ''}
       <ul class="history-exercises">
         ${exNames.map(n => `<li>${n}</li>`).join('')}
-        ${(w.cardio || []).map(c => `<li>${c.type} — ${c.minutes} min${c.azm ? ` · ${c.azm} AZM` : ''}${c.fitbitMinutes ? ` (${c.fitbitMinutes} min total)` : ''}${c.fitbitId ? ' ⌚' : ''}</li>`).join('')}
+        ${(w.cardio || []).map(c => `<li>${c.type} — ${c.minutes} min${c.azm ? ` · ${c.azm} AZM` : ''}${c.fitbitMinutes && c.fitbitMinutes !== c.minutes ? ` (${c.fitbitMinutes} min session, ${c.minutes} above ${CARDIO_HR_BPM} bpm)` : ''}${c.fitbitId ? ' ⌚' : ''}</li>`).join('')}
       </ul>
       ${w.fitbit?.isLift && !hasLifting(w) ? `
         <select class="input-field history-assign">
