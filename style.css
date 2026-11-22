@@ -512,7 +512,7 @@ textarea.input-field { resize: vertical; }
 .history-fitbit { font-size: 12px; color: var(--muted); margin-top: 4px; }
 .history-assign { margin-top: 10px; font-size: 13px; padding: 8px 10px; }
 #fitbit-sync-status { font-size: 13px; }
-#fitbit-sync-btn:disabled { opacity: 0.6; }
+#fitbit-sync-btn:disabled, #fitbit-sync-week-btn:disabled { opacity: 0.6; }
 
 /* Taller charts: about half the screen so bar heights are easy to compare */
 .chart-box { position: relative; height: 45vh; min-height: 260px; max-height: 520px; }

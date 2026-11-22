@@ -730,11 +730,14 @@ const fitbitMeta = s => ({ id: s.id, type: s.exerciseType, name: s.name, isLift:
   minutes: s.minutes, azm: s.azm, avgHr: s.avgHr, calories: s.calories });
 
 // Every exercise session Fitbit has, newest first, 25 per request
-async function fetchFitbitAll(token, onPage) {
+// sinceDateStr ('YYYY-MM-DD') limits the download to sessions starting on/after that date
+async function fetchFitbitAll(token, onPage, sinceDateStr = null) {
   const all = [];
   let pageToken = '';
+  const filter = sinceDateStr
+    ? `&filter=${encodeURIComponent(`exercise.interval.civil_start_time >= "${sinceDateStr}"`)}` : '';
   for (let page = 0; page < 400; page++) { // safety cap: 10,000 sessions
-    const url = `${FITBIT.api}/exercise/dataPoints?pageSize=25` +
+    const url = `${FITBIT.api}/exercise/dataPoints?pageSize=25${filter}` +
                 (pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : '');
     const resp = await fetch(url, { headers: { Authorization: 'Bearer ' + token } });
     if (resp.status === 401) {
@@ -799,25 +802,28 @@ async function fetchFitbitSteps(fromDateStr, token, onChunk = () => {}) {
   stepsByDate = saved;
 }
 
-function syncFitbitHistory() {
+// days = 7 for the quick weekly sync; null for the full history
+function syncFitbitHistory(days = null) {
   const status = document.getElementById('fitbit-sync-status');
-  const btn = document.getElementById('fitbit-sync-btn');
+  const btns = [document.getElementById('fitbit-sync-btn'), document.getElementById('fitbit-sync-week-btn')];
+  const since = days ? new Date(Date.now() - days * 86400000) : null;
   status.classList.remove('fitbit-error');
   status.textContent = 'Signing in…';
-  btn.disabled = true;
+  btns.forEach(b => { b.disabled = true; });
 
   getFitbitToken() // called straight from the tap so the sign-in popup isn't blocked
     .then(token => {
       status.textContent = 'Downloading Fitbit workouts…';
       return fetchFitbitAll(token,
-        n => { status.textContent = `Downloading Fitbit workouts… ${n} found`; });
+        n => { status.textContent = `Downloading Fitbit workouts… ${n} found`; },
+        since ? localDateStr(since) : null);
     })
     .then(importFitbitSessions)
     .then(async summary => {
       const workouts = await dbGetAll('workouts');
-      const earliest = workouts.length
+      const earliest = since || (workouts.length
         ? new Date(Math.min(...workouts.map(w => new Date(w.date).getTime())))
-        : new Date(Date.now() - 730 * 86400000);
+        : new Date(Date.now() - 730 * 86400000));
       status.textContent = 'Downloading daily steps…';
       await fetchFitbitSteps(localDateStr(earliest), fitbitToken.value,
         upTo => { status.textContent = `Downloading daily steps… through ${upTo}`; });
@@ -833,7 +839,9 @@ function syncFitbitHistory() {
       status.classList.add('fitbit-error');
       status.textContent = err.message;
     })
-    .finally(() => { btn.disabled = false; });
+    .finally(() => {
+      btns.forEach(b => { b.disabled = false; });
+    });
 }
 
 async function importFitbitSessions(dataPoints) {
@@ -1551,7 +1559,8 @@ async function loadSettings() {
 
   document.getElementById('send-recap-btn').onclick  = sendRecap;
   document.getElementById('export-btn').onclick      = exportData;
-  document.getElementById('fitbit-sync-btn').onclick = syncFitbitHistory;
+  document.getElementById('fitbit-sync-week-btn').onclick = () => syncFitbitHistory(7);
+  document.getElementById('fitbit-sync-btn').onclick = () => syncFitbitHistory();
   document.getElementById('clear-data-btn').onclick  = clearData;
 }
 
