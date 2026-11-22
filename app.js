@@ -1212,6 +1212,10 @@ function chartDefaults() {
 // Color follows the entity: Day N and each cardio type always get the same color.
 const SERIES_COLORS = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#0ca30c', '#9085e9', '#e66767'];
 const OTHER_COLOR   = '#6b6b68';
+// Workout-day chart: D2 Legs is red. Unassigned weightlifting is a light lavender,
+// which stays distinct from the red (a pink/magenta would be too close to it).
+const DAY_COLORS          = ['#3987e5', '#e34948', '#199e70', '#c98500'];
+const WEIGHTLIFTING_COLOR = '#c4b5fd';
 const CHART_SURFACE = '#1a1a1a';
 
 // Time range toggle. Short ranges use weekly bars; longer ranges switch to
@@ -1437,8 +1441,8 @@ function renderWorkoutsChart(workouts) {
   const zeros = periods.map(() => 0);
 
   const datasets = exercises.days.map((day, i) => stackedDataset(`D${day.id}: ${day.label}`,
-    counts['D' + day.id] || zeros, SERIES_COLORS[i] || OTHER_COLOR));
-  if (counts.lift)  datasets.push(stackedDataset('Weightlifting', counts.lift, SERIES_COLORS[4]));
+    counts['D' + day.id] || zeros, DAY_COLORS[i] || OTHER_COLOR));
+  if (counts.lift)  datasets.push(stackedDataset('Weightlifting', counts.lift, WEIGHTLIFTING_COLOR));
   if (counts.other) datasets.push(stackedDataset('Other', counts.other, OTHER_COLOR));
 
   const options = stackedBarOptions('Workout days', '');
