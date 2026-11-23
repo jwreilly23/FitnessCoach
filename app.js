@@ -190,7 +190,7 @@ async function renderHome() {
   // Week stats
   const weekStart = getWeekStart(now);
   const thisWeek  = workouts.filter(w => new Date(w.date) >= weekStart);
-  const cardioMin = thisWeek.reduce((s, w) => s + (w.cardio || []).reduce((a, c) => a + c.minutes, 0), 0);
+  const cardioMin = thisWeek.reduce((s, w) => s + cardioParts(w).reduce((a, c) => a + c.minutes, 0), 0);
   document.getElementById('week-stats').innerHTML = `
     <div class="stat-box"><div class="stat-val">${Object.values(groupByDate(thisWeek)).filter(isWorkoutDay).length}</div><div class="stat-lbl">Workout days</div></div>
     <div class="stat-box"><div class="stat-val">${cardioMin}</div><div class="stat-lbl">Cardio min</div></div>
@@ -781,19 +781,25 @@ async function updateHrMinutes(token, onProgress = () => {}) {
   workouts.forEach(w => (w.cardio || []).forEach(c => {
     if (c.fitbitId && c.fitbitStart && c.fitbitEnd && !c.hrChecked) todo.push({ w, c });
   }));
+  // Lifting sessions too: their minutes above 80 bpm count as cardio minutes
+  workouts.forEach(w => {
+    const f = w.fitbit;
+    if (f?.isLift && f.start && f.end && !f.hrChecked) todo.push({ w, lift: f });
+  });
   let done = 0, failed = null;
   const total = todo.length;
   const worker = async () => {
     while (todo.length && !failed) { // stop all workers once one hits an error
-      const { w, c } = todo.shift();
+      const { w, c, lift } = todo.shift();
       try {
-        c.hrMinutes = await fetchHrMinutes(c.fitbitStart, c.fitbitEnd, token);
+        if (lift) lift.hrMinutes = await fetchHrMinutes(lift.start, lift.end, token);
+        else c.hrMinutes = await fetchHrMinutes(c.fitbitStart, c.fitbitEnd, token);
       } catch (err) {
         failed = failed || err;
         return;
       }
-      c.hrChecked = true;
-      applyCardioMinutes(c);
+      if (lift) lift.hrChecked = true;
+      else { c.hrChecked = true; applyCardioMinutes(c); }
       await dbPut('workouts', w); // saved one by one, so progress survives an error
       done++;
       if (!failed) onProgress(done, total);
@@ -825,7 +831,8 @@ const FITBIT_OTHER_CARDIO = new Set(['HIIT', 'CARDIO_WORKOUT', 'AEROBIC_WORKOUT'
   'CARDIO_SCULPT', 'ZUMBA', 'DANCING', 'WATER_AEROBICS']);
 
 const fitbitMeta = s => ({ id: s.id, type: s.exerciseType, name: s.name, isLift: s.isLift,
-  minutes: s.minutes, azm: s.azm, avgHr: s.avgHr, calories: s.calories });
+  minutes: s.minutes, azm: s.azm, avgHr: s.avgHr, calories: s.calories,
+  start: s.startTime, end: s.endTime });
 
 // Every exercise session Fitbit has, newest first, 25 per request
 // sinceDateStr ('YYYY-MM-DD') limits the download to sessions starting on/after that date
@@ -917,7 +924,7 @@ function syncFitbitHistory(days = null) {
       status.textContent = 'Checking heart rate during workouts…';
       const checked = await updateHrMinutes(fitbitToken.value,
         (n, total) => { status.textContent = `Checking heart rate during workouts… ${n} of ${total}`; });
-      return summary + (checked ? ` Heart rate checked for ${checked} cardio session${checked === 1 ? '' : 's'}.` : '');
+      return summary + (checked ? ` Heart rate checked for ${checked} workout${checked === 1 ? '' : 's'}.` : '');
     })
     .then(async summary => {
       const workouts = await dbGetAll('workouts');
@@ -968,6 +975,11 @@ async function importFitbitSessions(dataPoints) {
       if (hit && !hit.c.fitbitStart) {
         Object.assign(hit.c, { fitbitStart: s.startTime, fitbitEnd: s.endTime });
         await dbPut('workouts', hit.w);
+      }
+      const lift = workouts.find(w => w.fitbit?.id === s.id);
+      if (lift && !lift.fitbit.start) {
+        Object.assign(lift.fitbit, { start: s.startTime, end: s.endTime });
+        await dbPut('workouts', lift);
       }
       continue;
     }
@@ -1135,6 +1147,7 @@ async function renderHistory() {
       </div>
       ${w.fitbit ? `<div class="history-fitbit">⌚ ${[w.fitbit.name, `${w.fitbit.minutes} min`,
           w.fitbit.azm ? `${w.fitbit.azm} AZM` : '', w.fitbit.avgHr ? `${w.fitbit.avgHr} bpm avg` : '',
+          w.fitbit.hrChecked ? `${w.fitbit.hrMinutes || 0} min above ${CARDIO_HR_BPM} bpm` : '',
           w.fitbit.calories ? `${w.fitbit.calories} cal` : ''].filter(Boolean).join(' · ')}</div>` : ''}
       <ul class="history-exercises">
         ${exNames.map(n => `<li>${n}</li>`).join('')}
@@ -1489,8 +1502,17 @@ function renderWorkoutsChart(workouts) {
   drawChart('workouts', 'chart-workouts', periods.map(periodLabel), datasets, options);
 }
 
+// Everything that counts toward cardio minutes for a workout: its cardio entries,
+// plus a Fitbit lifting session's minutes with heart rate above 80 bpm
+function cardioParts(w) {
+  const parts = (w.cardio || []).map(c => ({ type: c.type, minutes: Number(c.minutes) || 0 }));
+  if (w.fitbit?.isLift && w.fitbit.hrMinutes > 0) parts.push({ type: 'Weightlifting', minutes: w.fitbit.hrMinutes });
+  return parts;
+}
+
 // Cardio types past the 8th color fold into "Other" rather than reusing a color
 function cardioGroup(type) {
+  if (type === 'Weightlifting') return 'Weightlifting';
   const idx = exercises.cardioTypes.indexOf(type);
   return idx >= 0 && idx < SERIES_COLORS.length && type !== 'Other' ? type : 'Other';
 }
@@ -1510,10 +1532,9 @@ function renderCardioChart(workouts) {
     let all = 0;
     workouts.forEach(w => {
       if (!periods.includes(periodKey(w))) return;
-      (w.cardio || []).forEach(c => {
-        const m = Number(c.minutes) || 0;
-        totals[cardioGroup(c.type)] = (totals[cardioGroup(c.type)] || 0) + m;
-        all += m;
+      cardioParts(w).forEach(c => {
+        totals[cardioGroup(c.type)] = (totals[cardioGroup(c.type)] || 0) + c.minutes;
+        all += c.minutes;
       });
     });
     const ALWAYS_SHOWN = new Set(['Lawn Mowing']);
@@ -1525,19 +1546,21 @@ function renderCardioChart(workouts) {
 
   const entries = {}; // group -> { period -> [minutes, ...] } in logged order
   [...workouts].sort((a, b) => new Date(a.date) - new Date(b.date)).forEach(w =>
-    (w.cardio || []).forEach(c => {
+    cardioParts(w).forEach(c => {
       const g = groupFor(c.type), p = periodKey(w);
       entries[g] ??= {};
-      (entries[g][p] ??= []).push(Number(c.minutes) || 0);
+      (entries[g][p] ??= []).push(c.minutes);
     }));
 
-  const groups = [...exercises.cardioTypes.map(cardioGroup), 'Other']
+  const groups = [...exercises.cardioTypes.map(cardioGroup), 'Weightlifting', 'Other']
     .filter((g, i, arr) => arr.indexOf(g) === i && entries[g] && periods.some(p => entries[g][p]))
     .sort((a, b) => (a === 'Other') - (b === 'Other'));
 
   const datasets = [];
   groups.forEach(g => {
-    const color = g === 'Other' ? OTHER_COLOR : SERIES_COLORS[exercises.cardioTypes.indexOf(g)];
+    const color = g === 'Other' ? OTHER_COLOR
+      : g === 'Weightlifting' ? WEIGHTLIFTING_COLOR
+      : SERIES_COLORS[exercises.cardioTypes.indexOf(g)];
     if (!perEntry) {
       const ds = stackedDataset(g, periods.map(p => (entries[g][p] || []).reduce((a, b) => a + b, 0)), color);
       ds.firstOfType = true;
