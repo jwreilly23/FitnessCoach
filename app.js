@@ -68,7 +68,21 @@ function setSetting(key, value) {
 
 // ── STATE ───────────────────────────────────────────────
 let exercises = null;   // loaded from exercises.json
-let activeDay = 1;      // current log tab (1–4)
+let activeDay = 1;      // current log tab: 1–4, or OTHER_DAY_ID for the Other tab
+const OTHER_DAY_ID = 0;
+
+// Day definition for a tab id; the Other tab offers every exercise, none prefilled
+function dayById(id) {
+  if (id === OTHER_DAY_ID) {
+    const seen = new Set();
+    const all = exercises.days.flatMap(d => d.exercises)
+      .filter(e => !seen.has(e.id) && seen.add(e.id))
+      .map(e => ({ ...e, primary: false }));
+    return { id: OTHER_DAY_ID, label: 'Other', exercises: all };
+  }
+  return exercises.days.find(d => d.id === id);
+}
+const exerciseById = id => exercises.days.flatMap(d => d.exercises).find(e => e.id === id);
 let sessionSets = {};   // { exerciseId: [{reps, weight, rpe}] }
 let sessionCardio = []; // [{ type, minutes }]
 let progressCharts = {};
@@ -100,6 +114,7 @@ async function boot() {
   exercises = await fetch('exercises.json').then(r => r.json());
   await migrateCardioTypes();
   loadSettings();
+  activeDay = await getNextDay(await dbGetAll('workouts')); // Log opens on the day that's up
   await renderHome();
   renderLog();
   renderHistory();
@@ -210,16 +225,21 @@ const isLiftWorkout = w => hasLifting(w) || !!w.fitbit?.isLift;
 
 function workoutTitle(w) {
   const day = exercises.days.find(d => d.id === w.dayId);
-  if (isLiftWorkout(w)) return day ? `Day ${day.id}: ${day.label}` : 'Weightlifting (Fitbit)';
+  if (isLiftWorkout(w)) return day ? `Day ${day.id}: ${day.label}` : w.fitbit && !hasLifting(w) ? 'Weightlifting (Fitbit)' : 'Weightlifting';
   return 'Cardio';
 }
 
+// The training day that's "up": whichever of D1–D4 was done longest ago
+// (a day never done comes first; ties go to the lower day number)
 async function getNextDay(workouts) {
-  workouts = workouts.filter(w => isLiftWorkout(w) && w.dayId);
-  // Find the last completed day; suggest next in rotation
-  if (!workouts.length) return 1;
-  const last = workouts.sort((a, b) => new Date(b.date) - new Date(a.date))[0];
-  return (last.dayId % 4) + 1;
+  const lastDone = {};
+  workouts.filter(w => isLiftWorkout(w) && w.dayId).forEach(w => {
+    const t = new Date(w.date).getTime();
+    if (!(lastDone[w.dayId] >= t)) lastDone[w.dayId] = t;
+  });
+  return exercises.days
+    .map(d => ({ id: d.id, t: lastDone[d.id] ?? -Infinity }))
+    .sort((a, b) => a.t - b.t || a.id - b.id)[0].id;
 }
 
 function getWeekStart(date) {
@@ -249,11 +269,11 @@ function renderLog() {
   // Build day tabs
   const tabs = document.getElementById('day-tabs');
   tabs.innerHTML = '';
-  exercises.days.forEach(day => {
+  [...exercises.days, { id: OTHER_DAY_ID, label: 'Other' }].forEach(day => {
     const btn = document.createElement('button');
     btn.className = 'day-tab' + (day.id === activeDay ? ' active' : '');
     btn.dataset.day = day.id;
-    btn.textContent = `D${day.id}: ${day.label}`;
+    btn.textContent = day.id === OTHER_DAY_ID ? 'Other' : `D${day.id}: ${day.label}`;
     btn.onclick = () => {
       activeDay = day.id;
       highlightDayTab();
@@ -327,11 +347,11 @@ const sameDate = w => localDateStr(new Date(w.date)) === logDate;
 // open that entry for editing; otherwise (or with fresh) start a new log
 // pre-filled from the last time this day was done.
 async function initSessionForDay(dayId, { fresh = false } = {}) {
-  const day = exercises.days.find(d => d.id === dayId);
+  const day = dayById(dayId);
   const all = await dbGetAll('workouts');
   const byNewest = (a, b) => new Date(b.date) - new Date(a.date);
 
-  editingWorkout = fresh ? null
+  editingWorkout = fresh || dayId === OTHER_DAY_ID ? null
     : all.filter(w => w.dayId === dayId && sameDate(w)).sort(byNewest)[0] || null;
 
   sessionSets = {};
@@ -374,12 +394,12 @@ function updateSaveButtons() {
 
 // Any exercise for this day that isn't on the form yet (primaries first)
 function buildAlternateSelect(dayId) {
-  const day = exercises.days.find(d => d.id === dayId);
+  const day = dayById(dayId);
   const sel = document.getElementById('alternate-select');
   sel.innerHTML = '<option value="">— select —</option>';
   [...day.exercises].sort((a, b) => b.primary - a.primary).forEach(ex => {
     if (!sessionSets[ex.id]) {
-      sel.innerHTML += `<option value="${ex.id}">${ex.name}${ex.primary ? '' : ' (alt)'}</option>`;
+      sel.innerHTML += `<option value="${ex.id}">${ex.name}${ex.primary || dayId === OTHER_DAY_ID ? '' : ' (alt)'}</option>`;
     }
   });
 }
@@ -393,7 +413,7 @@ function addAlternateExercise() {
 }
 
 function renderExerciseList() {
-  const day = exercises.days.find(d => d.id === activeDay);
+  const day = dayById(activeDay);
   document.getElementById('log-title').textContent = `Log: ${day.label}`;
   const list = document.getElementById('exercise-list');
   list.innerHTML = '';
@@ -503,7 +523,7 @@ async function loadBaseline(exId) {
   const workouts = workoutsUpToLogDate(await dbGetAll('workouts'))
     .filter(w => w.id !== editingWorkout?.id); // don't compare an entry to itself
   const last = workouts
-    .filter(w => w.dayId === activeDay && w.sets?.[exId]?.length)
+    .filter(w => (activeDay === OTHER_DAY_ID || w.dayId === activeDay) && w.sets?.[exId]?.length)
     .sort((a, b) => new Date(b.date) - new Date(a.date))[0];
 
   const el = document.getElementById('baseline-' + exId);
@@ -1084,7 +1104,7 @@ async function saveWorkout() {
   const workout = {
     ...(editingWorkout ? { id: editingWorkout.id } : {}),
     ...(editingWorkout?.fitbit ? { fitbit: editingWorkout.fitbit } : {}),
-    dayId:  activeDay,
+    dayId:  activeDay === OTHER_DAY_ID ? null : activeDay,
     date:   date.toISOString(),
     sets,
     cardio: [...sessionCardio],
@@ -1126,10 +1146,7 @@ async function renderHistory() {
     }
     const day = exercises.days.find(d => d.id === w.dayId);
     const cardioMin = (w.cardio || []).reduce((s, c) => s + c.minutes, 0);
-    const exNames = Object.keys(w.sets || {}).map(id => {
-      const ex = day?.exercises.find(e => e.id === id);
-      return ex?.name || id;
-    });
+    const exNames = Object.keys(w.sets || {}).map(id => exerciseById(id)?.name || id);
 
     const el = document.createElement('div');
     el.className = 'history-item';
@@ -1776,7 +1793,7 @@ async function buildRecapBody() {
     body += `${workoutTitle(w)}\n\n`;
 
     Object.entries(w.sets || {}).forEach(([exId, sets]) => {
-      const ex = day?.exercises.find(e => e.id === exId);
+      const ex = exerciseById(exId);
       body += `  ${ex?.name || exId}\n`;
       sets.forEach((s, i) => {
         if (s.reps || s.weight) {
@@ -1801,7 +1818,7 @@ async function buildRecapBody() {
     const day = exercises.days.find(d => d.id === w.dayId);
     body += `${workoutTitle(w)}\n`;
     Object.entries(w.sets || {}).forEach(([exId, sets]) => {
-      const ex   = day?.exercises.find(e => e.id === exId);
+      const ex   = exerciseById(exId);
       const best = sets.reduce((b, s) => {
         const w = parseFloat(s.weight) || 0;
         return w > (parseFloat(b.weight) || 0) ? s : b;
